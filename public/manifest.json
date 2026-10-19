@@ -1,0 +1,20 @@
+{
+  "name": "UniSpend - Quản lý Chi tiêu Tuần Sinh viên",
+  "short_name": "UniSpend",
+  "description": "Ứng dụng quản lý chi tiêu cá nhân và ngân sách theo chu kỳ tuần dành cho sinh viên trên iPhone & MacBook.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F4F7FE",
+  "theme_color": "#F4F7FE",
+  "lang": "vi-VN",
+  "categories": ["finance", "productivity", "education"],
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

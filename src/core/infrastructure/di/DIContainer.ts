@@ -14,10 +14,18 @@ import { LocalStorageAuditLogRepository } from '../repositories/LocalStorageAudi
 import { LocalStorageCategoryRepository } from '../repositories/LocalStorageCategoryRepository';
 import { LocalStorageTransactionRepository } from '../repositories/LocalStorageTransactionRepository';
 import { LocalStorageWeeklyCycleRepository } from '../repositories/LocalStorageWeeklyCycleRepository';
+import {
+  SupabaseAuditLogRepository,
+  SupabaseCategoryRepository,
+  SupabaseTransactionRepository,
+  SupabaseWeeklyCycleRepository,
+} from '../repositories/SupabaseRepositories';
 import { SeedData } from '../SeedData';
 
 export class DIContainer {
   private static instance: DIContainer | null = null;
+
+  public readonly isCloudSyncEnabled: boolean;
 
   // Repositories
   public readonly transactionRepository: ITransactionRepository;
@@ -37,19 +45,47 @@ export class DIContainer {
   public readonly calculateWeeklyAnalyticsUseCase: CalculateWeeklyAnalyticsUseCase;
 
   private constructor() {
-    // Đảm bảo dữ liệu mẫu sinh viên được khởi tạo nếu chạy lần đầu trên trình duyệt
     SeedData.ensureSeeded();
 
-    // 1. Khởi tạo tầng Infrastructure Repositories
-    this.transactionRepository = new LocalStorageTransactionRepository();
-    this.categoryRepository = new LocalStorageCategoryRepository();
-    this.weeklyCycleRepository = new LocalStorageWeeklyCycleRepository();
-    this.auditLogRepository = new LocalStorageAuditLogRepository();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
-    // 2. Khởi tạo Factory
+    const localTxRepo = new LocalStorageTransactionRepository();
+    const localCatRepo = new LocalStorageCategoryRepository();
+    const localCycleRepo = new LocalStorageWeeklyCycleRepository();
+    const localAuditRepo = new LocalStorageAuditLogRepository();
+
+    if (supabaseUrl && supabaseAnonKey) {
+      this.isCloudSyncEnabled = true;
+      const config = { url: supabaseUrl, anonKey: supabaseAnonKey };
+
+      this.transactionRepository = new SupabaseTransactionRepository(
+        config,
+        localTxRepo
+      );
+      this.categoryRepository = new SupabaseCategoryRepository(
+        config,
+        localCatRepo
+      );
+      this.weeklyCycleRepository = new SupabaseWeeklyCycleRepository(
+        config,
+        this.transactionRepository,
+        localCycleRepo
+      );
+      this.auditLogRepository = new SupabaseAuditLogRepository(
+        config,
+        localAuditRepo
+      );
+    } else {
+      this.isCloudSyncEnabled = false;
+      this.transactionRepository = localTxRepo;
+      this.categoryRepository = localCatRepo;
+      this.weeklyCycleRepository = localCycleRepo;
+      this.auditLogRepository = localAuditRepo;
+    }
+
     this.transactionFactory = new TransactionFactory();
 
-    // 3. Tiêm (Inject) Repositories vào các Application Use Cases
     this.createTransactionUseCase = new CreateTransactionUseCase(
       this.transactionRepository,
       this.categoryRepository,
@@ -90,9 +126,6 @@ export class DIContainer {
     );
   }
 
-  /**
-   * Truy xuất Singleton Instance duy nhất của DIContainer
-   */
   public static getInstance(): DIContainer {
     if (!DIContainer.instance) {
       DIContainer.instance = new DIContainer();
