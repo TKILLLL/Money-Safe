@@ -1,0 +1,50 @@
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #F4F7FE;
+    --surface-card: #FFFFFF;
+    --accent-primary: #8B5CF6;
+    --accent-secondary: #A855F7;
+    --semantic-safe: #10B981;
+    --semantic-warning: #F97316;
+    --semantic-danger: #EF4444;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: #1E293B;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", Segoe UI, Roboto, sans-serif;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  /* Hỗ trợ Safe Area cho PWA trên iPhone */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 1rem);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  /* Ẩn thanh cuộn nhưng vẫn cho phép vuốt mượt trên iOS/macOS */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
