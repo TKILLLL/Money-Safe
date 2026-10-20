@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -11,8 +12,10 @@ import {
   HardDrive,
   PiggyBank,
   Repeat,
+  RotateCcw,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -122,7 +125,7 @@ export const WeeklyBudgetScreen: React.FC = () => {
         </div>
       </SoftCard>
 
-      {/* Thông báo khi cập nhật ngân sách hoặc sao lưu/khôi phục thành công */}
+      {/* Thông báo khi cập nhật ngân sách hoặc sao lưu/khôi phục/reset thành công */}
       {bannerNotice && (
         <div className="flex items-center gap-2 rounded-2xl bg-semantic-safe-light/90 px-4 py-3 text-xs sm:text-sm font-bold text-semantic-safe-dark border border-semantic-safe/25 shadow-soft">
           <CheckCircle2 className="h-4 w-4 shrink-0 text-semantic-safe" />
@@ -227,7 +230,8 @@ export const WeeklyBudgetScreen: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {categoryBudgets.map((item) => {
             const clampedPct = Math.min(Math.max(item.usagePercentage, 0), 100);
-            const isOver = item.status === 'OVER_LIMIT' || item.remaining.isNegative();
+            const isOver =
+              item.status === 'OVER_LIMIT' || item.remaining.isNegative();
             const isWarning = item.status === 'WARNING';
 
             const barColorClass = isOver
@@ -329,7 +333,7 @@ export const WeeklyBudgetScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal Cài đặt Ngân sách, Kết chuyển Tuần & Sao lưu Export/Import JSON */}
+      {/* Modal Cài đặt Ngân sách, Kết chuyển Tuần, Sao lưu JSON & Reset dữ liệu */}
       {isSettingsOpen && summary && (
         <BudgetSettingsModal
           initialWeeklyAllowance={summary.weeklyAllowance.amount}
@@ -438,6 +442,8 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isRollingOver, setIsRollingOver] = useState<boolean>(false);
+  const [confirmReset, setConfirmReset] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
   const [backupError, setBackupError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -468,6 +474,24 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleExecuteResetAll = async () => {
+    try {
+      setIsResetting(true);
+      setBackupError(null);
+      await BackupService.resetAllData();
+      await onBackupRestored(
+        'Đã xóa sạch toàn bộ giao dịch mẫu và làm mới ngân sách về 0đ!'
+      );
+    } catch (err) {
+      setBackupError(
+        err instanceof Error ? err.message : 'Không thể làm mới dữ liệu.'
+      );
+    } finally {
+      setIsResetting(false);
+      setConfirmReset(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -687,7 +711,7 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 4. Sao lưu & Khôi phục dữ liệu (Export / Import JSON) + Trạng thái Cloud */}
+          {/* 4. Sao lưu, Khôi phục (Export/Import JSON) & Reset dữ liệu về 0đ */}
           <div className="rounded-2xl border border-slate-200/80 bg-surface-muted/80 p-3.5 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-ink-primary">
@@ -748,6 +772,50 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
                 className="hidden"
               />
             </div>
+
+            {/* Khu vực Reset toàn bộ dữ liệu về 0đ (Có bước xác nhận 2 lớp) */}
+            {!confirmReset ? (
+              <button
+                type="button"
+                onClick={() => setConfirmReset(true)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-semantic-danger/30 bg-semantic-danger-light/60 px-3 py-2.5 text-xs font-bold text-semantic-danger-dark hover:bg-semantic-danger-light active:scale-95 transition-all"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Xóa toàn bộ dữ liệu (Làm mới về 0đ)</span>
+              </button>
+            ) : (
+              <div className="rounded-xl border border-semantic-danger/40 bg-semantic-danger-light/80 p-3 space-y-2.5">
+                <div className="flex items-start gap-2 text-xs text-semantic-danger-dark">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-semantic-danger" />
+                  <p className="font-semibold leading-snug">
+                    Xác nhận xóa sạch mọi giao dịch và đưa ngân sách tuần về 0đ? (Các danh mục của bạn vẫn được giữ lại).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <PillButton
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    fullWidth
+                    onClick={() => setConfirmReset(false)}
+                    className="bg-white/80 text-ink-primary hover:bg-white"
+                  >
+                    Hủy
+                  </PillButton>
+                  <PillButton
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    fullWidth
+                    isLoading={isResetting}
+                    leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                    onClick={() => void handleExecuteResetAll()}
+                  >
+                    Xác nhận xóa về 0đ
+                  </PillButton>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5 pt-1">

@@ -126,7 +126,6 @@ export class BackupService {
       );
     }
 
-    // Xác thực từng bản ghi qua Domain Mappers để bảo vệ tính toàn vẹn OOP
     const validCategories = parsed.categories.map((dto) =>
       CategoryMapper.toPersistence(CategoryMapper.toDomain(dto))
     );
@@ -166,5 +165,46 @@ export class BackupService {
       transactionsCount: validTransactions.length,
       auditLogsCount: validAuditLogs.length,
     };
+  }
+
+  /**
+   * Xóa sạch toàn bộ giao dịch, chu kỳ tuần và nhật ký về 0đ (LocalStorage + Supabase)
+   * Giữ lại danh mục mặc định và chặn SeedData tự nạp lại dữ liệu mẫu.
+   */
+  public static async resetAllData(): Promise<void> {
+    if (!BackupService.isBrowser()) return;
+
+    // 1. Xóa sạch giao dịch, chu kỳ tuần và log ở LocalStorage nhưng giữ cờ SEED_INITIALIZED = 'true'
+    window.localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_KEYS.WEEKLY_CYCLES, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify([]));
+    window.localStorage.setItem(STORAGE_KEYS.SEED_INITIALIZED, 'true');
+
+    // 2. Nếu có kết nối Supabase Cloud thì xóa luôn trên đám mây
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()?.replace(/\/+$/, '');
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+    if (supabaseUrl && supabaseAnonKey) {
+      const headers: HeadersInit = {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        Prefer: 'return=minimal',
+      };
+
+      await Promise.allSettled([
+        fetch(`${supabaseUrl}/rest/v1/transactions?id=neq.__none__`, {
+          method: 'DELETE',
+          headers,
+        }),
+        fetch(`${supabaseUrl}/rest/v1/weekly_cycles?id=neq.__none__`, {
+          method: 'DELETE',
+          headers,
+        }),
+        fetch(`${supabaseUrl}/rest/v1/audit_logs?id=neq.__none__`, {
+          method: 'DELETE',
+          headers,
+        }),
+      ]);
+    }
   }
 }
