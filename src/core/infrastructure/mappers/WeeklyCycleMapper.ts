@@ -16,6 +16,7 @@ export interface WeeklyCyclePersistenceDTO {
   currency: string;
   isClosed: boolean;
   transactions: TransactionPersistenceDTO[];
+  categoryLimitsSnapshot?: Record<string, number>;
 }
 
 export class WeeklyCycleMapper {
@@ -31,6 +32,7 @@ export class WeeklyCycleMapper {
       transactions: entity.transactions.map((tx) =>
         TransactionMapper.toPersistence(tx)
       ),
+      categoryLimitsSnapshot: { ...entity.categoryLimitsSnapshot },
     };
   }
 
@@ -48,6 +50,9 @@ export class WeeklyCycleMapper {
       weeklyAllowance: new Money(dto.weeklyAllowanceAmount, currency),
       transactions: domainTransactions,
       isClosed: Boolean(dto.isClosed),
+      categoryLimitsSnapshot: dto.categoryLimitsSnapshot
+        ? { ...dto.categoryLimitsSnapshot }
+        : {},
     });
   }
 }

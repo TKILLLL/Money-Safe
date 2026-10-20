@@ -39,6 +39,7 @@ export class LocalStorageAuditLogRepository implements IAuditLogRepository {
       this.ssrMemoryStore = dtos;
       return;
     }
+    SeedData.markAsSeededPermanently();
     window.localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(dtos));
   }
 
@@ -47,6 +48,11 @@ export class LocalStorageAuditLogRepository implements IAuditLogRepository {
     const dto = AuditLogMapper.toPersistence(entry);
     dtos.unshift(dto);
     this.writeAllDTOs(dtos);
+  }
+
+  public async clearAll(): Promise<void> {
+    SeedData.markAsSeededPermanently();
+    this.writeAllDTOs([]);
   }
 
   public async findByWeekPeriod(period: WeekPeriod): Promise<AuditLog[]> {

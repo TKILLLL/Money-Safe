@@ -9,7 +9,6 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import type { RolloverStrategyType } from '@/core/application/services/CycleRolloverService';
 import type { WeeklyAnalyticsOutput } from '@/core/application/use-cases/CalculateWeeklyAnalyticsUseCase';
 import type { CreateTransactionInput } from '@/core/application/use-cases/CreateTransactionUseCase';
 import type {
@@ -24,6 +23,7 @@ import type { WeeklyCycle } from '@/core/domain/entities/WeeklyCycle';
 import { Money } from '@/core/domain/value-objects/Money';
 import { WeekPeriod } from '@/core/domain/value-objects/WeekPeriod';
 import { DIContainer } from '@/core/infrastructure/di/DIContainer';
+import { SeedData } from '@/core/infrastructure/SeedData';
 
 export type AppTabId = 'input' | 'calendar' | 'analytics' | 'budget';
 
@@ -44,6 +44,7 @@ export interface ExpenseTrackerContextValue {
   setSelectedDate: (date: Date) => void;
   navigateWeek: (direction: 'prev' | 'next' | 'current') => void;
   isCurrentWeek: boolean;
+  resetAllDataToZero: () => Promise<void>;
 
   analytics: WeeklyAnalyticsOutput | null;
   categories: Category[];
@@ -63,11 +64,8 @@ export interface ExpenseTrackerContextValue {
   restoreCategory: (categoryId: string) => Promise<Category>;
   updateWeeklyAllowance: (
     weeklyAllowance: number | Money,
-    openingBalance?: number | Money
-  ) => Promise<WeeklyCycle>;
-  rolloverWeek: (
-    strategyType: RolloverStrategyType,
-    savingCategoryId?: string
+    openingBalance?: number | Money,
+    categoryLimits?: { id: string; limitAmount: number }[]
   ) => Promise<WeeklyCycle>;
   refreshData: () => Promise<void>;
 }
@@ -80,7 +78,6 @@ export interface ExpenseTrackerProviderProps {
   children: React.ReactNode;
 }
 
-// Ngày neo cố định phục vụ pha SSR ban đầu để không lệch múi giờ/mili-giây giữa Server & Client
 const SSR_FALLBACK_DATE = new Date(2026, 9, 19, 12, 0, 0, 0);
 
 export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
@@ -104,7 +101,6 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Đánh dấu đã Hydrate trên trình duyệt và đồng bộ về ngày thực tế hiện tại
   useEffect(() => {
     const now = new Date();
     setSelectedDateState(now);
@@ -162,6 +158,37 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
     },
     []
   );
+
+  const resetAllDataToZero = useCallback(async (): Promise<void> => {
+    const container = DIContainer.getInstance();
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Khóa chặt cờ 'expense_tracker_seeded' = 'true' để SeedData không bao giờ tự chạy lại
+      SeedData.markAsSeededPermanently();
+
+      const now = new Date();
+      const currentPeriod = WeekPeriod.fromDate(now);
+
+      await container.manageWeeklyCycleUseCase.resetAllDataToZero(now);
+
+      setSelectedDateState(now);
+      setSelectedWeek(currentPeriod);
+
+      // Tải lại toàn bộ state ngay lập tức trên UI
+      await loadDataForSelection(currentPeriod, now);
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Không thể làm mới dữ liệu về 0.';
+      setError(msg);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadDataForSelection]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -281,6 +308,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
             icon: payload.icon,
             color: payload.color,
             weeklyLimit: payload.weeklyLimit,
+            referenceDate: selectedDate,
           };
           saved = await container.manageCategoryUseCase.updateCategory(updateInput);
         } else {
@@ -291,6 +319,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
             color: payload.color,
             type: payload.type,
             weeklyLimit: payload.weeklyLimit,
+            referenceDate: selectedDate,
           };
           saved = await container.manageCategoryUseCase.createCategory(createInput);
         }
@@ -303,7 +332,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
         throw err;
       }
     },
-    [allCategoriesIncludingArchived, refreshData]
+    [allCategoriesIncludingArchived, selectedDate, refreshData]
   );
 
   const archiveCategory = useCallback(
@@ -347,7 +376,8 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
   const updateWeeklyAllowance = useCallback(
     async (
       weeklyAllowance: number | Money,
-      openingBalance?: number | Money
+      openingBalance?: number | Money,
+      categoryLimits?: { id: string; limitAmount: number }[]
     ): Promise<WeeklyCycle> => {
       const container = DIContainer.getInstance();
       try {
@@ -357,6 +387,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
             referenceDate: selectedDate,
             weeklyAllowance,
             openingBalance,
+            categoryLimits,
           });
         await refreshData();
         return updatedCycle;
@@ -372,35 +403,6 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
     [selectedDate, refreshData]
   );
 
-  const rolloverWeek = useCallback(
-    async (
-      strategyType: RolloverStrategyType,
-      savingCategoryId?: string
-    ): Promise<WeeklyCycle> => {
-      const container = DIContainer.getInstance();
-      try {
-        setError(null);
-        const nextCycle =
-          await container.manageWeeklyCycleUseCase.triggerManualRollover(
-            selectedDate,
-            strategyType,
-            savingCategoryId
-          );
-        setSelectedWeek(nextCycle.weekPeriod);
-        setSelectedDateState(nextCycle.weekPeriod.startDate);
-        return nextCycle;
-      } catch (err) {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : 'Không thể kết chuyển sang tuần mới.';
-        setError(msg);
-        throw err;
-      }
-    },
-    [selectedDate]
-  );
-
   const contextValue = useMemo<ExpenseTrackerContextValue>(
     () => ({
       activeTab,
@@ -410,6 +412,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
       setSelectedDate,
       navigateWeek,
       isCurrentWeek,
+      resetAllDataToZero,
       analytics,
       categories,
       allCategoriesIncludingArchived,
@@ -426,7 +429,6 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
       archiveCategory,
       restoreCategory,
       updateWeeklyAllowance,
-      rolloverWeek,
       refreshData,
     }),
     [
@@ -436,6 +438,7 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
       setSelectedDate,
       navigateWeek,
       isCurrentWeek,
+      resetAllDataToZero,
       analytics,
       categories,
       allCategoriesIncludingArchived,
@@ -453,7 +456,6 @@ export const ExpenseTrackerProvider: React.FC<ExpenseTrackerProviderProps> = ({
       archiveCategory,
       restoreCategory,
       updateWeeklyAllowance,
-      rolloverWeek,
       refreshData,
     ]
   );

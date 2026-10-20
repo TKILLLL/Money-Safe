@@ -17,21 +17,37 @@ export const STORAGE_KEYS = {
   WEEKLY_CYCLES: 'student_expense_pwa_weekly_cycles_v1',
   AUDIT_LOGS: 'student_expense_pwa_audit_logs_v1',
   SEED_INITIALIZED: 'student_expense_pwa_seeded_v1',
+  SEED_LOCK: 'expense_tracker_seeded',
 } as const;
 
 export class SeedData {
   /**
-   * Kiểm tra và tự động khởi tạo dữ liệu mẫu nếu chạy ứng dụng lần đầu tiên
+   * Đánh dấu vĩnh viễn đã khởi tạo để chặn SeedData tự động nạp đè lại số tiền mẫu
+   */
+  public static markAsSeededPermanently(): void {
+    if (typeof window === 'undefined' || !window.localStorage) {
+      return;
+    }
+    window.localStorage.setItem(STORAGE_KEYS.SEED_LOCK, 'true');
+    window.localStorage.setItem(STORAGE_KEYS.SEED_INITIALIZED, 'true');
+  }
+
+  /**
+   * Kiểm tra và chỉ khởi tạo dữ liệu mẫu duy nhất ở lần đầu tiên mở app
    */
   public static ensureSeeded(): void {
     if (typeof window === 'undefined' || !window.localStorage) {
       return;
     }
 
-    const isAlreadySeeded = window.localStorage.getItem(STORAGE_KEYS.SEED_INITIALIZED);
+    const isLocked = window.localStorage.getItem(STORAGE_KEYS.SEED_LOCK) === 'true';
+    const isLegacySeeded =
+      window.localStorage.getItem(STORAGE_KEYS.SEED_INITIALIZED) === 'true';
     const existingCategories = window.localStorage.getItem(STORAGE_KEYS.CATEGORIES);
 
-    if (isAlreadySeeded === 'true' && existingCategories) {
+    // Nếu đã có cờ khóa 'expense_tracker_seeded' = 'true' thì TUYỆT ĐỐI KHÔNG chạy lại SeedData
+    if (isLocked || (isLegacySeeded && existingCategories)) {
+      SeedData.markAsSeededPermanently();
       return;
     }
 
@@ -40,6 +56,10 @@ export class SeedData {
 
     // 1. Khởi tạo 8 Danh mục mặc định chuẩn nhu cầu sinh viên
     const defaultCategories = SeedData.createDefaultStudentCategories();
+    const initialSnapshot: Record<string, number> = {};
+    for (const cat of defaultCategories) {
+      initialSnapshot[cat.id] = cat.weeklyLimit.amount;
+    }
 
     // 2. Khởi tạo 6 Giao dịch mẫu rải đều trong tuần hiện tại
     const sampleTransactions = SeedData.createSampleTransactionsForWeek(
@@ -47,7 +67,7 @@ export class SeedData {
       now
     );
 
-    // 3. Khởi tạo Chu kỳ tuần hiện tại (Chu cấp 750,000đ/tuần ~ 3,000,000đ/tháng)
+    // 3. Khởi tạo Chu kỳ tuần hiện tại
     const currentCycle = new WeeklyCycle({
       id: `cycle_${currentPeriod.weekKey}`,
       weekPeriod: currentPeriod,
@@ -55,16 +75,17 @@ export class SeedData {
       weeklyAllowance: Money.fromAmount(750_000),
       transactions: sampleTransactions,
       isClosed: false,
+      categoryLimitsSnapshot: initialSnapshot,
     });
 
-    // 4. Khởi tạo Nhật ký thao tác (AuditLog) tương ứng với dữ liệu mẫu
+    // 4. Khởi tạo Nhật ký thao tác (AuditLog)
     const sampleAuditLogs = SeedData.createSampleAuditLogs(
       currentCycle,
       sampleTransactions,
       defaultCategories
     );
 
-    // 5. Lưu toàn bộ xuống LocalStorage
+    // 5. Lưu toàn bộ xuống LocalStorage và khóa cờ Seed vĩnh viễn
     window.localStorage.setItem(
       STORAGE_KEYS.CATEGORIES,
       JSON.stringify(defaultCategories.map((c) => CategoryMapper.toPersistence(c)))
@@ -85,19 +106,16 @@ export class SeedData {
       JSON.stringify(sampleAuditLogs.map((log) => AuditLogMapper.toPersistence(log)))
     );
 
-    window.localStorage.setItem(STORAGE_KEYS.SEED_INITIALIZED, 'true');
+    SeedData.markAsSeededPermanently();
   }
 
-  /**
-   * 8 Danh mục mặc định chuẩn nhu cầu sinh viên với icon Lucide, màu sắc và hạn mức tuần hợp lý
-   */
   public static createDefaultStudentCategories(): Category[] {
     return [
       new Category({
         id: 'cat_food',
         name: 'Ăn uống',
         icon: 'Utensils',
-        color: '#F97316', // Cam
+        color: '#F97316',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(350_000),
       }),
@@ -105,7 +123,7 @@ export class SeedData {
         id: 'cat_weekly_shopping',
         name: 'Chi tiêu hàng tuần',
         icon: 'ShoppingBag',
-        color: '#10B981', // Xanh lá
+        color: '#10B981',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(120_000),
       }),
@@ -113,7 +131,7 @@ export class SeedData {
         id: 'cat_laundry',
         name: 'Giặt ủi & giặt sấy',
         icon: 'Shirt',
-        color: '#3B82F6', // Xanh dương
+        color: '#3B82F6',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(50_000),
       }),
@@ -121,7 +139,7 @@ export class SeedData {
         id: 'cat_utilities',
         name: 'Tiền điện & nước',
         icon: 'Droplets',
-        color: '#06B6D4', // Xanh cyan
+        color: '#06B6D4',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(70_000),
       }),
@@ -129,7 +147,7 @@ export class SeedData {
         id: 'cat_internet',
         name: 'Mạng',
         icon: 'Smartphone',
-        color: '#64748B', // Xám xanh
+        color: '#64748B',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(35_000),
       }),
@@ -137,7 +155,7 @@ export class SeedData {
         id: 'cat_gym',
         name: 'Gym',
         icon: 'Dumbbell',
-        color: '#0EA5E9', // Xanh biển
+        color: '#0EA5E9',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(65_000),
       }),
@@ -145,7 +163,7 @@ export class SeedData {
         id: 'cat_incidentals',
         name: 'Chi phí phát sinh',
         icon: 'Pencil',
-        color: '#EAB308', // Vàng
+        color: '#EAB308',
         type: 'EXPENSE',
         weeklyLimit: Money.fromAmount(80_000),
       }),
@@ -153,16 +171,13 @@ export class SeedData {
         id: 'cat_saving',
         name: 'Tiết kiệm',
         icon: 'Landmark',
-        color: '#84CC16', // Xanh neon
+        color: '#84CC16',
         type: 'SAVING',
         weeklyLimit: Money.fromAmount(100_000),
       }),
     ];
   }
 
-  /**
-   * Tạo 6 giao dịch mẫu rải đều các ngày trong tuần hiện tại, đảm bảo có giao dịch trong ngày hôm nay
-   */
   public static createSampleTransactionsForWeek(
     period: WeekPeriod,
     referenceNow: Date

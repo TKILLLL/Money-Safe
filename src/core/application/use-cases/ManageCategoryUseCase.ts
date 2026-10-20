@@ -1,8 +1,11 @@
+// src/core/application/use-cases/ManageCategoryUseCase.ts
 import { AuditLog } from '../../domain/entities/AuditLog';
 import { Category, type CategoryType } from '../../domain/entities/Category';
 import type { IAuditLogRepository } from '../../domain/repositories/IAuditLogRepository';
 import type { ICategoryRepository } from '../../domain/repositories/ICategoryRepository';
+import type { IWeeklyCycleRepository } from '../../domain/repositories/IWeeklyCycleRepository';
 import { Money } from '../../domain/value-objects/Money';
+import { WeekPeriod } from '../../domain/value-objects/WeekPeriod';
 import { TransactionFactory } from '../factories/TransactionFactory';
 
 export interface CreateCategoryInput {
@@ -12,6 +15,7 @@ export interface CreateCategoryInput {
   color: string;
   type: CategoryType;
   weeklyLimit?: number | Money;
+  referenceDate?: Date;
 }
 
 export interface UpdateCategoryInput {
@@ -20,12 +24,14 @@ export interface UpdateCategoryInput {
   icon?: string;
   color?: string;
   weeklyLimit?: number | Money;
+  referenceDate?: Date;
 }
 
 export class ManageCategoryUseCase {
   public constructor(
     private readonly categoryRepository: ICategoryRepository,
-    private readonly auditLogRepository: IAuditLogRepository
+    private readonly auditLogRepository: IAuditLogRepository,
+    private readonly weeklyCycleRepository?: IWeeklyCycleRepository
   ) {}
 
   private normalizeLimit(limit?: number | Money): Money {
@@ -36,8 +42,43 @@ export class ManageCategoryUseCase {
   }
 
   /**
-   * 1. Tạo mới danh mục thu/chi/tiết kiệm
+   * Khi thay đổi hạn mức 1 danh mục ở tuần referenceDate:
+   * - Đóng băng hạn mức cũ cho các tuần quá khứ (< referencePeriod)
+   * - Cập nhật snapshot hạn mức mới cho tuần hiện tại & tương lai (>= referencePeriod)
    */
+  private async syncSnapshotFromPeriodOnwards(
+    categoryId: string,
+    oldLimit: Money,
+    newLimit: Money,
+    referenceDate: Date = new Date()
+  ): Promise<void> {
+    if (!this.weeklyCycleRepository) return;
+
+    const targetPeriod = WeekPeriod.fromDate(referenceDate);
+    const targetStartTime = targetPeriod.startDate.getTime();
+    const allCycles = await this.weeklyCycleRepository.findAllCycles();
+
+    for (const summaryCycle of allCycles) {
+      const cycleStartTime = summaryCycle.weekPeriod.startDate.getTime();
+      const fullCycle = await this.weeklyCycleRepository.findByWeekPeriod(
+        summaryCycle.weekPeriod
+      );
+      if (!fullCycle) continue;
+
+      if (cycleStartTime < targetStartTime) {
+        // Tuần quá khứ: nếu chưa có snapshot của danh mục này thì khóa giá trị CŨ
+        if (fullCycle.getCategoryLimitSnapshot(categoryId) === null) {
+          fullCycle.setCategoryLimitSnapshot(categoryId, oldLimit);
+          await this.weeklyCycleRepository.update(fullCycle);
+        }
+      } else {
+        // Tuần đang xét và các tuần tương lai: cập nhật sang giá trị MỚI
+        fullCycle.setCategoryLimitSnapshot(categoryId, newLimit);
+        await this.weeklyCycleRepository.update(fullCycle);
+      }
+    }
+  }
+
   public async createCategory(input: CreateCategoryInput): Promise<Category> {
     const existingCategories = await this.categoryRepository.findAll(true);
     const duplicate = existingCategories.find(
@@ -51,17 +92,24 @@ export class ManageCategoryUseCase {
       throw new Error(`Danh mục "${input.name.trim()}" đã tồn tại trong nhóm ${input.type}.`);
     }
 
+    const initialLimit = this.normalizeLimit(input.weeklyLimit);
     const category = new Category({
       id: input.id?.trim() ? input.id.trim() : TransactionFactory.generateId('cat'),
       name: input.name,
       icon: input.icon,
       color: input.color,
       type: input.type,
-      weeklyLimit: this.normalizeLimit(input.weeklyLimit),
+      weeklyLimit: initialLimit,
       isArchived: false,
     });
 
     await this.categoryRepository.save(category);
+    await this.syncSnapshotFromPeriodOnwards(
+      category.id,
+      initialLimit,
+      initialLimit,
+      input.referenceDate ?? new Date()
+    );
 
     const auditLog = AuditLog.create({
       id: TransactionFactory.generateId('audit'),
@@ -76,9 +124,6 @@ export class ManageCategoryUseCase {
     return category;
   }
 
-  /**
-   * 2. Cập nhật tên, icon, màu sắc hoặc hạn mức chi tiêu tuần của danh mục
-   */
   public async updateCategory(input: UpdateCategoryInput): Promise<Category> {
     const category = await this.categoryRepository.findById(input.id);
     if (!category) {
@@ -95,7 +140,14 @@ export class ManageCategoryUseCase {
     });
 
     if (input.weeklyLimit !== undefined) {
-      category.changeWeeklyLimit(this.normalizeLimit(input.weeklyLimit));
+      const nextLimit = this.normalizeLimit(input.weeklyLimit);
+      category.changeWeeklyLimit(nextLimit);
+      await this.syncSnapshotFromPeriodOnwards(
+        category.id,
+        oldLimit,
+        nextLimit,
+        input.referenceDate ?? new Date()
+      );
     }
 
     await this.categoryRepository.update(category);
@@ -113,9 +165,6 @@ export class ManageCategoryUseCase {
     return category;
   }
 
-  /**
-   * 3. Xóa mềm (Archive) danh mục để không làm hỏng lịch sử giao dịch cũ
-   */
   public async archiveCategory(categoryId: string): Promise<Category> {
     const category = await this.categoryRepository.findById(categoryId);
     if (!category) {
@@ -142,9 +191,6 @@ export class ManageCategoryUseCase {
     return category;
   }
 
-  /**
-   * 4. Khôi phục danh mục đã lưu trữ
-   */
   public async restoreCategory(categoryId: string): Promise<Category> {
     const category = await this.categoryRepository.findById(categoryId);
     if (!category) {
@@ -171,16 +217,10 @@ export class ManageCategoryUseCase {
     return category;
   }
 
-  /**
-   * 5. Lấy danh sách danh mục (mặc định ẩn các danh mục đã xóa mềm)
-   */
   public async getCategories(includeArchived: boolean = false): Promise<Category[]> {
     return this.categoryRepository.findAll(includeArchived);
   }
 
-  /**
-   * 6. Tìm chi tiết một danh mục theo ID
-   */
   public async getCategoryById(categoryId: string): Promise<Category | null> {
     return this.categoryRepository.findById(categoryId);
   }

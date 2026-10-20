@@ -3,19 +3,15 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Cloud,
   Download,
   HardDrive,
-  PiggyBank,
-  Repeat,
   RotateCcw,
   SlidersHorizontal,
   Sparkles,
-  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -23,13 +19,10 @@ import { useExpenseTracker } from '@/components/providers/ExpenseTrackerProvider
 import { CategoryIcon } from '@/components/ui/CategoryIcon';
 import { PillButton } from '@/components/ui/PillButton';
 import { SoftCard } from '@/components/ui/SoftCard';
-import type { RolloverStrategyType } from '@/core/application/services/CycleRolloverService';
 import type { Category } from '@/core/domain/entities/Category';
 import { BackupService } from '@/core/infrastructure/BackupService';
 import { DIContainer } from '@/core/infrastructure/di/DIContainer';
 import { cn } from '@/lib/utils';
-
-const ROLLOVER_PREF_KEY = 'student_expense_pwa_rollover_strategy_v1';
 
 function formatDigitsWithComma(digits: string): string {
   if (!digits) return '';
@@ -45,26 +38,14 @@ export const WeeklyBudgetScreen: React.FC = () => {
     analytics,
     categories,
     updateWeeklyAllowance,
-    saveCategory,
-    rolloverWeek,
+    resetAllDataToZero,
     refreshData,
   } = useExpenseTracker();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [rolloverStrategy, setRolloverStrategy] =
-    useState<RolloverStrategyType>('CARRY_OVER');
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
 
   const isCloudEnabled = DIContainer.getInstance().isCloudSyncEnabled;
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = window.localStorage.getItem(ROLLOVER_PREF_KEY);
-      if (saved === 'CARRY_OVER' || saved === 'TRANSFER_TO_SAVING') {
-        setRolloverStrategy(saved);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     if (!bannerNotice) return;
@@ -90,7 +71,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
       {/* 1. HEADER & CÀI ĐẶT CHU CẤP ĐẦU TUẦN */}
       <SoftCard padding="sm" radius="2xl">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          {/* Thanh chọn tuần < Tuần DD/MM - DD/MM/YYYY > */}
           <div className="flex items-center gap-1 rounded-full bg-surface-muted px-2 py-1 border border-slate-200/70">
             <button
               type="button"
@@ -113,7 +93,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
             </button>
           </div>
 
-          {/* Nút Cài đặt ngân sách (Icon Sliders) ở góc phải */}
           <PillButton
             variant="secondary"
             size="sm"
@@ -125,7 +104,7 @@ export const WeeklyBudgetScreen: React.FC = () => {
         </div>
       </SoftCard>
 
-      {/* Thông báo khi cập nhật ngân sách hoặc sao lưu/khôi phục/reset thành công */}
+      {/* Thông báo khi cập nhật ngân sách hoặc làm mới dữ liệu thành công */}
       {bannerNotice && (
         <div className="flex items-center gap-2 rounded-2xl bg-semantic-safe-light/90 px-4 py-3 text-xs sm:text-sm font-bold text-semantic-safe-dark border border-semantic-safe/25 shadow-soft">
           <CheckCircle2 className="h-4 w-4 shrink-0 text-semantic-safe" />
@@ -140,7 +119,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
           radius="3xl"
           className="space-y-3.5 border-2 border-primary/15 bg-gradient-to-br from-white via-white to-primary-50/40"
         >
-          {/* Dòng 1: Tổng ngân sách tuần | Còn lại: [RemainingWeeklyBalance]đ */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-primary" />
@@ -161,7 +139,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
             </span>
           </div>
 
-          {/* Dòng 2: Thanh Progress Bar bo tròn mượt mà hiển thị % tổng tiền đã tiêu */}
           <div className="flex items-center gap-3">
             <div
               role="progressbar"
@@ -193,7 +170,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
             </span>
           </div>
 
-          {/* Dòng 3: Chu cấp tuần: [TotalWeeklyAvailable]đ | Đã chi: [TotalWeeklyExpense]đ */}
           <div className="flex items-center justify-between text-xs sm:text-sm text-ink-secondary pt-0.5">
             <span>
               Chu cấp tuần:{' '}
@@ -217,21 +193,19 @@ export const WeeklyBudgetScreen: React.FC = () => {
           <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-ink-secondary">
             Ngân sách theo Danh mục ({categoryBudgets.length})
           </h3>
-          <span className="text-xs font-medium text-ink-secondary">
-            Cuối tuần:{' '}
-            <strong className="font-bold text-primary">
-              {rolloverStrategy === 'CARRY_OVER'
-                ? 'Cộng dồn tuần sau'
-                : 'Chuyển vào Tiết kiệm'}
-            </strong>
-          </span>
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            className="text-xs font-bold text-primary hover:underline"
+          >
+            Chỉnh hạn mức
+          </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {categoryBudgets.map((item) => {
             const clampedPct = Math.min(Math.max(item.usagePercentage, 0), 100);
-            const isOver =
-              item.status === 'OVER_LIMIT' || item.remaining.isNegative();
+            const isOver = item.status === 'OVER_LIMIT' || item.remaining.isNegative();
             const isWarning = item.status === 'WARNING';
 
             const barColorClass = isOver
@@ -255,7 +229,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
                 onClick={() => setIsSettingsOpen(true)}
                 className="space-y-3"
               >
-                {/* Dòng 1: Icon + Tên danh mục | Còn lại */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div
@@ -284,7 +257,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Dòng 2: Thanh Progress Bar đổi màu theo mức độ tiêu dùng + % */}
                 <div className="flex items-center gap-3">
                   <div
                     role="progressbar"
@@ -312,7 +284,6 @@ export const WeeklyBudgetScreen: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Dòng 3: Ngân sách mục | Chi tiêu mục */}
                 <div className="flex items-center justify-between text-xs text-ink-secondary">
                   <span>
                     Ngân sách mục:{' '}
@@ -333,55 +304,39 @@ export const WeeklyBudgetScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal Cài đặt Ngân sách, Kết chuyển Tuần, Sao lưu JSON & Reset dữ liệu */}
+      {/* Modal Cài đặt Ngân sách & Sao lưu */}
       {isSettingsOpen && summary && (
         <BudgetSettingsModal
           initialWeeklyAllowance={summary.weeklyAllowance.amount}
           initialOpeningBalance={summary.openingBalance.amount}
-          initialStrategy={rolloverStrategy}
           isCloudEnabled={isCloudEnabled}
           categories={categories.filter(
             (c) => c.type === 'EXPENSE' || c.type === 'SAVING'
+          )}
+          snapshotLimits={Object.fromEntries(
+            categoryBudgets.map((item) => [
+              item.categoryId,
+              item.weeklyLimit.amount,
+            ])
           )}
           onClose={() => setIsSettingsOpen(false)}
           onSaveAll={async (payload) => {
             await updateWeeklyAllowance(
               payload.weeklyAllowance,
-              payload.openingBalance
+              payload.openingBalance,
+              payload.categoryLimits
             );
 
-            for (const catUpdate of payload.categoryLimits) {
-              const targetCat = categories.find((c) => c.id === catUpdate.id);
-              if (
-                targetCat &&
-                targetCat.weeklyLimit.amount !== catUpdate.limitAmount
-              ) {
-                await saveCategory({
-                  id: targetCat.id,
-                  name: targetCat.name,
-                  icon: targetCat.icon,
-                  color: targetCat.color,
-                  type: targetCat.type,
-                  weeklyLimit: catUpdate.limitAmount,
-                });
-              }
-            }
-
-            setRolloverStrategy(payload.strategy);
-            if (typeof window !== 'undefined' && window.localStorage) {
-              window.localStorage.setItem(ROLLOVER_PREF_KEY, payload.strategy);
-            }
-
-            setIsSettingsOpen(false);
-            setBannerNotice('Đã cập nhật ngân sách tuần và hạn mức các danh mục!');
-          }}
-          onTriggerRolloverNow={async (strategy) => {
-            await rolloverWeek(strategy);
             setIsSettingsOpen(false);
             setBannerNotice(
-              strategy === 'CARRY_OVER'
-                ? 'Đã kết chuyển cộng dồn số dư sang tuần kế tiếp!'
-                : 'Đã chuyển phần dư vào quỹ Tiết kiệm và khởi tạo tuần mới!'
+              'Đã lưu ngân sách cho tuần này và tương lai (các tuần trước được giữ nguyên)!'
+            );
+          }}
+          onResetAllToZero={async () => {
+            await resetAllDataToZero();
+            setIsSettingsOpen(false);
+            setBannerNotice(
+              'Đã xoá toàn bộ giao dịch và đưa ngân sách tuần, hạn mức các danh mục về 0đ!'
             );
           }}
           onBackupRestored={async (message) => {
@@ -398,29 +353,28 @@ export const WeeklyBudgetScreen: React.FC = () => {
 interface BudgetSettingsModalProps {
   initialWeeklyAllowance: number;
   initialOpeningBalance: number;
-  initialStrategy: RolloverStrategyType;
   isCloudEnabled: boolean;
   categories: Category[];
+  snapshotLimits: Record<string, number>;
   onClose: () => void;
   onSaveAll: (payload: {
     weeklyAllowance: number;
     openingBalance: number;
-    strategy: RolloverStrategyType;
     categoryLimits: { id: string; limitAmount: number }[];
   }) => Promise<void>;
-  onTriggerRolloverNow: (strategy: RolloverStrategyType) => Promise<void>;
+  onResetAllToZero: () => Promise<void>;
   onBackupRestored: (message: string) => Promise<void>;
 }
 
 const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
   initialWeeklyAllowance,
   initialOpeningBalance,
-  initialStrategy,
   isCloudEnabled,
   categories,
+  snapshotLimits,
   onClose,
   onSaveAll,
-  onTriggerRolloverNow,
+  onResetAllToZero,
   onBackupRestored,
 }) => {
   const [allowanceDigits, setAllowanceDigits] = useState<string>(
@@ -429,19 +383,20 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
   const [openingDigits, setOpeningDigits] = useState<string>(
     initialOpeningBalance !== 0 ? String(Math.abs(initialOpeningBalance)) : ''
   );
-  const [strategy, setStrategy] =
-    useState<RolloverStrategyType>(initialStrategy);
 
   const [limitMap, setLimitMap] = useState<Record<string, string>>(() => {
     const record: Record<string, string> = {};
     for (const c of categories) {
-      record[c.id] = c.weeklyLimit.amount > 0 ? String(c.weeklyLimit.amount) : '';
+      const effectiveAmount =
+        snapshotLimits[c.id] !== undefined
+          ? snapshotLimits[c.id]
+          : c.weeklyLimit.amount;
+      record[c.id] = effectiveAmount > 0 ? String(effectiveAmount) : '';
     }
     return record;
   });
 
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [isRollingOver, setIsRollingOver] = useState<boolean>(false);
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
   const [backupError, setBackupError] = useState<string | null>(null);
@@ -476,21 +431,27 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
     reader.readAsText(file);
   };
 
-  const handleExecuteResetAll = async () => {
+  const handleExecuteResetToZero = async () => {
+    setIsResetting(true);
+    setBackupError(null);
     try {
-      setIsResetting(true);
-      setBackupError(null);
-      await BackupService.resetAllData();
-      await onBackupRestored(
-        'Đã xóa sạch toàn bộ giao dịch mẫu và làm mới ngân sách về 0đ!'
-      );
+      // Đưa toàn bộ state input trong modal về 0 trước khi đóng
+      setAllowanceDigits('');
+      setOpeningDigits('');
+      const clearedLimits: Record<string, string> = {};
+      for (const c of categories) {
+        clearedLimits[c.id] = '';
+      }
+      setLimitMap(clearedLimits);
+
+      await onResetAllToZero();
     } catch (err) {
       setBackupError(
-        err instanceof Error ? err.message : 'Không thể làm mới dữ liệu.'
+        err instanceof Error
+          ? err.message
+          : 'Không thể làm mới dữ liệu về 0.'
       );
-    } finally {
       setIsResetting(false);
-      setConfirmReset(false);
     }
   };
 
@@ -509,7 +470,6 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
       await onSaveAll({
         weeklyAllowance: allowanceAmount,
         openingBalance: openingAmount,
-        strategy,
         categoryLimits,
       });
     } finally {
@@ -534,7 +494,7 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
               Cài đặt Ngân sách & Sao lưu
             </h3>
             <p className="text-xs text-ink-secondary">
-              Chu cấp đầu tuần, hạn mức danh mục & đồng bộ dữ liệu
+              Cấu hình mặc định tự động áp dụng khi bước sang tuần mới
             </p>
           </div>
           <button
@@ -564,7 +524,7 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
                   onChange={(e) =>
                     setAllowanceDigits(e.target.value.replace(/\D/g, ''))
                   }
-                  placeholder="750,000"
+                  placeholder="0"
                   className="w-full rounded-2xl border border-slate-200 bg-surface-muted pl-4 pr-9 py-2.5 text-base font-bold tabular-nums text-ink-primary focus:border-primary focus:bg-white focus:outline-none"
                 />
                 <span className="absolute right-3.5 text-xs font-bold text-ink-secondary">
@@ -595,82 +555,12 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Chiến lược xử lý tiền dư cuối tuần (Strategy Pattern) */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-ink-secondary">
-              Chiến lược xử lý số dư cuối tuần khi sang tuần mới
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setStrategy('CARRY_OVER')}
-                className={cn(
-                  'flex items-start gap-2.5 rounded-2xl p-3 text-left border transition-all',
-                  strategy === 'CARRY_OVER'
-                    ? 'border-[#8B5CF6] bg-primary-50/80 text-ink-primary shadow-sm'
-                    : 'border-slate-200 bg-surface text-ink-secondary'
-                )}
-              >
-                <Repeat className="h-5 w-5 shrink-0 text-primary mt-0.5" />
-                <div>
-                  <p className="text-xs font-bold text-ink-primary">
-                    Cộng dồn sang tuần sau
-                  </p>
-                  <p className="text-[11px] text-ink-secondary mt-0.5">
-                    Cộng phần dư vào Số dư đầu tuần mới
-                  </p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setStrategy('TRANSFER_TO_SAVING')}
-                className={cn(
-                  'flex items-start gap-2.5 rounded-2xl p-3 text-left border transition-all',
-                  strategy === 'TRANSFER_TO_SAVING'
-                    ? 'border-[#8B5CF6] bg-primary-50/80 text-ink-primary shadow-sm'
-                    : 'border-slate-200 bg-surface text-ink-secondary'
-                )}
-              >
-                <PiggyBank className="h-5 w-5 shrink-0 text-semantic-safe mt-0.5" />
-                <div>
-                  <p className="text-xs font-bold text-ink-primary">
-                    Chuyển vào Tiết kiệm
-                  </p>
-                  <p className="text-[11px] text-ink-secondary mt-0.5">
-                    Tự động trích dư vào quỹ Tiết kiệm, tuần mới về 0đ
-                  </p>
-                </div>
-              </button>
-            </div>
-
-            <div className="pt-1">
-              <button
-                type="button"
-                disabled={isRollingOver}
-                onClick={async () => {
-                  setIsRollingOver(true);
-                  try {
-                    await onTriggerRolloverNow(strategy);
-                  } finally {
-                    setIsRollingOver(false);
-                  }
-                }}
-                className="text-xs font-bold text-primary hover:underline"
-              >
-                {isRollingOver
-                  ? 'Đang thực hiện kết chuyển...'
-                  : '→ Thực hiện đóng sổ & kết chuyển sang tuần kế tiếp ngay'}
-              </button>
-            </div>
-          </div>
-
-          {/* 3. Hạn mức tuần cho từng danh mục */}
+          {/* 2. Hạn mức tuần cho từng danh mục */}
           <div className="space-y-2.5">
             <label className="text-xs font-bold text-ink-secondary">
-              Hạn mức tuần cho từng danh mục
+              Hạn mức tuần cho từng danh mục (weeklyLimit)
             </label>
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
               {categories.map((cat) => (
                 <div
                   key={cat.id}
@@ -711,7 +601,7 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 4. Sao lưu, Khôi phục (Export/Import JSON) & Reset dữ liệu về 0đ */}
+          {/* 3. Sao lưu, Khôi phục & Nút "Xoá toàn bộ dữ liệu (Làm mới về 0)" */}
           <div className="rounded-2xl border border-slate-200/80 bg-surface-muted/80 p-3.5 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-ink-primary">
@@ -773,49 +663,46 @@ const BudgetSettingsModal: React.FC<BudgetSettingsModalProps> = ({
               />
             </div>
 
-            {/* Khu vực Reset toàn bộ dữ liệu về 0đ (Có bước xác nhận 2 lớp) */}
-            {!confirmReset ? (
-              <button
-                type="button"
-                onClick={() => setConfirmReset(true)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-semantic-danger/30 bg-semantic-danger-light/60 px-3 py-2.5 text-xs font-bold text-semantic-danger-dark hover:bg-semantic-danger-light active:scale-95 transition-all"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                <span>Xóa toàn bộ dữ liệu (Làm mới về 0đ)</span>
-              </button>
-            ) : (
-              <div className="rounded-xl border border-semantic-danger/40 bg-semantic-danger-light/80 p-3 space-y-2.5">
-                <div className="flex items-start gap-2 text-xs text-semantic-danger-dark">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-semantic-danger" />
-                  <p className="font-semibold leading-snug">
-                    Xác nhận xóa sạch mọi giao dịch và đưa ngân sách tuần về 0đ? (Các danh mục của bạn vẫn được giữ lại).
+            {/* Nút "Xoá toàn bộ dữ liệu (Làm mới về 0)" */}
+            <div className="pt-1 border-t border-slate-200/70">
+              {!confirmReset ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(true)}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-semantic-danger/30 bg-semantic-danger-light/60 px-3 py-2.5 text-xs font-bold text-semantic-danger-dark hover:bg-semantic-danger-light active:scale-95 transition-all"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Xoá toàn bộ dữ liệu (Làm mới về 0)</span>
+                </button>
+              ) : (
+                <div className="rounded-xl bg-semantic-danger-light p-3 space-y-2.5 border border-semantic-danger/30">
+                  <p className="text-[11px] font-semibold text-semantic-danger-dark leading-relaxed">
+                    Giữ nguyên danh sách danh mục hiện có, nhưng đưa toàn bộ hạn mức, ngân sách tuần về 0đ và xoá sạch lịch sử giao dịch?
                   </p>
+                  <div className="flex items-center gap-2">
+                    <PillButton
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      fullWidth
+                      onClick={() => setConfirmReset(false)}
+                    >
+                      Huỷ
+                    </PillButton>
+                    <PillButton
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      fullWidth
+                      isLoading={isResetting}
+                      onClick={() => void handleExecuteResetToZero()}
+                    >
+                      Xác nhận làm mới về 0
+                    </PillButton>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <PillButton
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    fullWidth
-                    onClick={() => setConfirmReset(false)}
-                    className="bg-white/80 text-ink-primary hover:bg-white"
-                  >
-                    Hủy
-                  </PillButton>
-                  <PillButton
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    fullWidth
-                    isLoading={isResetting}
-                    leftIcon={<Trash2 className="h-3.5 w-3.5" />}
-                    onClick={() => void handleExecuteResetAll()}
-                  >
-                    Xác nhận xóa về 0đ
-                  </PillButton>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2.5 pt-1">

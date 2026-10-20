@@ -1,8 +1,9 @@
 // src/components/screens/AppShell.tsx
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  Bell,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -16,8 +17,12 @@ import {
   type AppTabId,
   useExpenseTracker,
 } from '@/components/providers/ExpenseTrackerProvider';
+import { WeeklyRecapModal } from '@/components/screens/WeeklyRecapModal';
 import { SoftCard } from '@/components/ui/SoftCard';
+import { WeekPeriod } from '@/core/domain/value-objects/WeekPeriod';
 import { cn } from '@/lib/utils';
+
+const LAST_SEEN_RECAP_STORAGE_KEY = 'lastSeenRecapWeekId';
 
 interface NavTabItem {
   id: AppTabId;
@@ -57,8 +62,41 @@ export const AppShell: React.FC<AppShellProps> = ({
     clearError,
   } = useExpenseTracker();
 
-  const dailySafe = analytics?.dailySafeToSpend;
+  const [isRecapModalOpen, setIsRecapModalOpen] = useState<boolean>(false);
+
   const weeklySummary = analytics?.weeklySummary;
+  const previousWeekRecap = analytics?.previousWeekRecap;
+
+  // Cơ chế tự động hiển thị Modal vào Thứ Hai hoặc lần đầu tiên mở app trong tuần mới
+  useEffect(() => {
+    if (isLoading || !previousWeekRecap) return;
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    const currentRealWeekKey = WeekPeriod.currentWeek().weekKey;
+    const isViewingRealCurrentWeek = selectedWeek.weekKey === currentRealWeekKey;
+    if (!isViewingRealCurrentWeek) return;
+
+    const lastSeenWeekId = window.localStorage.getItem(
+      LAST_SEEN_RECAP_STORAGE_KEY
+    );
+
+    // Tự động mở nếu tuần hiện tại chưa từng xem bảng tổng kết VÀ tuần trước đó có phát sinh dữ liệu
+    if (lastSeenWeekId !== currentRealWeekKey && previousWeekRecap.hasActivity) {
+      setIsRecapModalOpen(true);
+    }
+  }, [isLoading, previousWeekRecap, selectedWeek]);
+
+  // Đóng Modal và lưu lastSeenRecapWeekId vào LocalStorage
+  const handleCloseRecapModal = () => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const currentRealWeekKey = WeekPeriod.currentWeek().weekKey;
+      window.localStorage.setItem(
+        LAST_SEEN_RECAP_STORAGE_KEY,
+        currentRealWeekKey
+      );
+    }
+    setIsRecapModalOpen(false);
+  };
 
   const renderActiveTabContent = (): React.ReactNode => {
     switch (activeTab) {
@@ -75,11 +113,10 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   return (
     <div className="min-h-dvh bg-[#F4F7FE] text-[#1E293B] flex flex-col items-center">
-      {/* Khung ứng dụng trung tâm: vừa vặn tuyệt đối trên cả iPhone & MacBook */}
       <div className="w-full max-w-[540px] min-h-dvh flex flex-col pb-28">
         {/* Top Sticky Header */}
         <header className="sticky top-0 z-30 pt-safe bg-[#F4F7FE]/90 backdrop-blur-xl px-4 pt-3 pb-2.5 space-y-2.5">
-          {/* Hàng 1: Logo thương hiệu + Huy hiệu "Hôm nay còn" */}
+          {/* Hàng 1: Logo thương hiệu + Nút xem lại "Tổng kết tuần trước" */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5">
               <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-[#8B5CF6] to-[#A855F7] text-white shadow-soft-primary">
@@ -95,18 +132,20 @@ export const AppShell: React.FC<AppShellProps> = ({
               </div>
             </div>
 
-            {dailySafe && (
-              <div
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold shadow-xs',
-                  dailySafe.isOverspentToday
-                    ? 'bg-[#FEE2E2] text-[#B91C1C]'
-                    : 'bg-[#D1FAE5] text-[#047857]'
-                )}
+            {/* Nút mở xem lại Bảng Tổng kết Tuần trước bất cứ lúc nào */}
+            {previousWeekRecap && (
+              <button
+                type="button"
+                onClick={() => setIsRecapModalOpen(true)}
+                title="Xem tổng kết tuần trước"
+                className="relative inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[#6D28D9] shadow-soft border border-slate-100 hover:bg-[#F5F3FF] active:scale-95 transition-all"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                <span>Hôm nay còn: {dailySafe.todayRemaining.formatVND()}</span>
-              </div>
+                <Bell className="h-3.5 w-3.5 text-[#8B5CF6]" />
+                <span>Tổng kết tuần trước</span>
+                {previousWeekRecap.hasActivity && (
+                  <span className="h-2 w-2 rounded-full bg-[#8B5CF6]" />
+                )}
+              </button>
             )}
           </div>
 
@@ -219,7 +258,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         </main>
       </div>
 
-      {/* Bottom Navigation Bar cố định dạng Floating Dock chuẩn Apple HIG */}
+      {/* Bottom Navigation Bar cố định dạng Floating Dock */}
       <nav
         aria-label="Điều hướng chính"
         className="fixed bottom-0 inset-x-0 z-40 pb-safe pointer-events-none flex justify-center px-4 pb-3"
@@ -269,6 +308,15 @@ export const AppShell: React.FC<AppShellProps> = ({
           })}
         </div>
       </nav>
+
+      {/* Modal Bảng Thông báo & Thống kê Đầu tuần (Monday Weekly Recap) */}
+      {previousWeekRecap && (
+        <WeeklyRecapModal
+          isOpen={isRecapModalOpen}
+          recap={previousWeekRecap}
+          onAcknowledgeAndClose={handleCloseRecapModal}
+        />
+      )}
     </div>
   );
 };

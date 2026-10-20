@@ -22,7 +22,7 @@ type EntryTabMode = 'EXPENSE_MODE' | 'INCOME_MODE';
 const QUICK_AMOUNT_CHIPS: readonly number[] = [15_000, 30_000, 35_000, 50_000, 100_000];
 
 /**
- * Định dạng ngày chuẩn DD/MM/YYYY (Th X) theo yêu cầu
+ * Định dạng ngày chuẩn DD/MM/YYYY (Th X)
  */
 function formatVietnameseEntryDate(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0');
@@ -39,7 +39,6 @@ export const QuickEntryScreen: React.FC = () => {
   const {
     selectedDate,
     setSelectedDate,
-    analytics,
     categories,
     addTransaction,
     saveCategory,
@@ -143,7 +142,6 @@ export const QuickEntryScreen: React.FC = () => {
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setLocalError(null);
     const digitsOnly = e.target.value.replace(/\D/g, '');
-    // Giới hạn tối đa 10 chữ số để tránh tràn số
     if (digitsOnly.length <= 10) {
       setAmountDigits(digitsOnly.replace(/^0+/, ''));
     }
@@ -176,7 +174,6 @@ export const QuickEntryScreen: React.FC = () => {
     try {
       setIsSubmitting(true);
 
-      // Giữ giờ hiện tại trên ngày đang chọn
       const now = new Date();
       const txTimestamp = new Date(
         selectedDate.getFullYear(),
@@ -195,11 +192,9 @@ export const QuickEntryScreen: React.FC = () => {
         note: note.trim(),
       });
 
-      // Reset ô tiền về 0 & xóa ghi chú
       setAmountDigits('');
       setNote('');
 
-      // Hiển thị thông báo thành công nhẹ nhàng
       setToastMessage(
         `Đã lưu ${chosenCategory.name}: ${createdTx.amount.formatVND()}`
       );
@@ -211,26 +206,6 @@ export const QuickEntryScreen: React.FC = () => {
       setIsSubmitting(false);
     }
   };
-
-  const dailySafe = analytics?.dailySafeToSpend;
-  const usagePct = dailySafe?.todayUsagePercentage ?? 0;
-  const clampedBarWidth = Math.min(Math.max(usagePct, 0), 100);
-
-  // Màu thanh Progress Bar theo đúng đặc tả:
-  // Tím/Xanh khi < 75%, Cam (#F97316) khi 75% - 99%, Đỏ (#EF4444) khi >= 100%
-  const progressColorClass =
-    usagePct >= 100
-      ? 'bg-semantic-danger'
-      : usagePct >= 75
-        ? 'bg-semantic-warning'
-        : 'bg-gradient-to-r from-primary to-semantic-safe';
-
-  const progressTextColorClass =
-    usagePct >= 100
-      ? 'text-semantic-danger'
-      : usagePct >= 75
-        ? 'text-semantic-warning'
-        : 'text-primary';
 
   return (
     <div className="space-y-4 sm:space-y-5">
@@ -279,72 +254,6 @@ export const QuickEntryScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. WIDGET "ĐƯỢC TIÊU HÔM NAY" (Daily Safe-to-Spend Card) */}
-      {dailySafe && (
-        <SoftCard padding="md" radius="2xl" className="space-y-3">
-          {/* Hàng 1: Tiêu đề đậm bên trái | Còn lại bên phải (đổi sang màu đỏ nếu âm) */}
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm sm:text-base font-bold text-ink-primary">
-              Được tiêu hôm nay
-            </h2>
-            <span
-              className={cn(
-                'text-sm sm:text-base font-bold tabular-nums',
-                dailySafe.todayRemaining.isNegative()
-                  ? 'text-semantic-danger'
-                  : 'text-ink-primary'
-              )}
-            >
-              Còn lại: {dailySafe.todayRemaining.formatVND()}
-            </span>
-          </div>
-
-          {/* Hàng 2: Thanh Progress Bar bo tròn + Con số [TodayUsagePercentage]% bên phải */}
-          <div className="flex items-center gap-3">
-            <div
-              role="progressbar"
-              aria-valuenow={usagePct}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              className="h-3 flex-1 overflow-hidden rounded-full bg-slate-100 shadow-inner-soft"
-            >
-              <div
-                className={cn(
-                  'h-full rounded-full transition-all duration-500 ease-apple-spring',
-                  progressColorClass
-                )}
-                style={{ width: `${clampedBarWidth}%` }}
-              />
-            </div>
-
-            <span
-              className={cn(
-                'w-11 text-right text-xs sm:text-sm font-bold tabular-nums shrink-0',
-                progressTextColorClass
-              )}
-            >
-              {usagePct}%
-            </span>
-          </div>
-
-          {/* Hàng 3: Chữ nhỏ màu xám (Định mức ngày | Đã chi hôm nay) */}
-          <div className="flex items-center justify-between text-xs text-ink-secondary">
-            <span>
-              Định mức ngày:{' '}
-              <strong className="font-semibold text-ink-primary tabular-nums">
-                {dailySafe.dailyAllowance.formatVND()}
-              </strong>
-            </span>
-            <span>
-              Đã chi hôm nay:{' '}
-              <strong className="font-semibold text-ink-primary tabular-nums">
-                {dailySafe.todaySpent.formatVND()}
-              </strong>
-            </span>
-          </div>
-        </SoftCard>
-      )}
-
       {/* Thông báo Toast khi lưu giao dịch thành công */}
       {toastMessage && (
         <div className="flex items-center gap-2 rounded-2xl bg-semantic-safe-light/90 px-4 py-3 text-xs sm:text-sm font-bold text-semantic-safe-dark border border-semantic-safe/25 shadow-soft animate-in fade-in slide-in-from-top-2 duration-200">
@@ -360,7 +269,7 @@ export const QuickEntryScreen: React.FC = () => {
         </div>
       )}
 
-      {/* 3. FORM NHẬP LIỆU NHANH */}
+      {/* 2. FORM NHẬP LIỆU NHANH (Ngày -> Ghi chú -> Số tiền) */}
       <form onSubmit={(e) => void handleSubmitTransaction(e)} className="space-y-4">
         <SoftCard padding="none" radius="2xl" className="divide-y divide-slate-100 overflow-hidden">
           {/* Hàng 1: NGÀY (DD/MM/YYYY (Th X) kèm 2 nút < >) */}
@@ -415,7 +324,7 @@ export const QuickEntryScreen: React.FC = () => {
             />
           </div>
 
-          {/* Hàng 3: TIỀN CHI / TIỀN THU (text-2xl font-bold, tự động format dấu phẩy, có đ bên phải) */}
+          {/* Hàng 3: TIỀN CHI / TIỀN THU */}
           <div className="px-4 sm:px-5 py-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <label
@@ -471,7 +380,7 @@ export const QuickEntryScreen: React.FC = () => {
           </div>
         </SoftCard>
 
-        {/* 4. LƯỚI DANH MỤC (CATEGORY GRID 3x3) & NÚT "CHỈNH SỬA >" */}
+        {/* 3. LƯỚI DANH MỤC (CATEGORY GRID 3x3) & NÚT "CHỈNH SỬA >" */}
         <div className="space-y-2.5">
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-bold uppercase tracking-wider text-ink-secondary">
@@ -552,7 +461,7 @@ export const QuickEntryScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* 5. PRIMARY CTA BUTTON: "Nhập khoản chi" / "Nhập khoản thu" */}
+        {/* 4. PRIMARY CTA BUTTON: "Nhập khoản chi" / "Nhập khoản thu" */}
         <div className="pt-2">
           <PillButton
             type="submit"

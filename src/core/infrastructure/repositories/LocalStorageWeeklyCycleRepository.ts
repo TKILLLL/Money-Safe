@@ -39,6 +39,7 @@ export class LocalStorageWeeklyCycleRepository implements IWeeklyCycleRepository
       this.ssrMemoryStore = dtos;
       return;
     }
+    SeedData.markAsSeededPermanently();
     window.localStorage.setItem(STORAGE_KEYS.WEEKLY_CYCLES, JSON.stringify(dtos));
   }
 
@@ -60,6 +61,11 @@ export class LocalStorageWeeklyCycleRepository implements IWeeklyCycleRepository
 
   public async update(cycle: WeeklyCycle): Promise<void> {
     await this.save(cycle);
+  }
+
+  public async clearAll(): Promise<void> {
+    SeedData.markAsSeededPermanently();
+    this.writeAllDTOs([]);
   }
 
   public async findByWeekPeriod(period: WeekPeriod): Promise<WeeklyCycle | null> {

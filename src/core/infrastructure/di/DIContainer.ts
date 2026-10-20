@@ -109,7 +109,8 @@ export class DIContainer {
 
     this.manageCategoryUseCase = new ManageCategoryUseCase(
       this.categoryRepository,
-      this.auditLogRepository
+      this.auditLogRepository,
+      this.weeklyCycleRepository
     );
 
     this.manageWeeklyCycleUseCase = new ManageWeeklyCycleUseCase(

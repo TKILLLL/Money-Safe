@@ -1,3 +1,4 @@
+// src/core/domain/entities/WeeklyCycle.ts
 import { Money } from '../value-objects/Money';
 import { WeekPeriod } from '../value-objects/WeekPeriod';
 import {
@@ -14,6 +15,7 @@ export interface WeeklyCycleProps {
   weeklyAllowance: Money;
   transactions?: Transaction[];
   isClosed?: boolean;
+  categoryLimitsSnapshot?: Record<string, number>;
 }
 
 export class WeeklyCycle {
@@ -26,6 +28,7 @@ export class WeeklyCycle {
   private _totalIncome: Money;
   private _totalSaving: Money;
   private _isClosed: boolean;
+  private _categoryLimitsSnapshot: Record<string, number>;
 
   public constructor(props: WeeklyCycleProps) {
     if (!props.id || !props.id.trim()) {
@@ -44,6 +47,9 @@ export class WeeklyCycle {
     this._totalIncome = Money.zero();
     this._totalSaving = Money.zero();
     this._isClosed = false;
+    this._categoryLimitsSnapshot = WeeklyCycle.sanitizeSnapshot(
+      props.categoryLimitsSnapshot
+    );
 
     if (props.transactions && props.transactions.length > 0) {
       for (const tx of props.transactions) {
@@ -51,8 +57,22 @@ export class WeeklyCycle {
       }
     }
 
-    // Đặt cờ isClosed sau khi đã nạp các giao dịch lịch sử
     this._isClosed = Boolean(props.isClosed);
+  }
+
+  private static sanitizeSnapshot(
+    raw?: Record<string, number>
+  ): Record<string, number> {
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+    const clean: Record<string, number> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (key.trim() && Number.isFinite(val) && val >= 0) {
+        clean[key.trim()] = Math.round(val);
+      }
+    }
+    return clean;
   }
 
   // Getters
@@ -76,6 +96,35 @@ export class WeeklyCycle {
     return this._isClosed;
   }
 
+  public get categoryLimitsSnapshot(): Readonly<Record<string, number>> {
+    return { ...this._categoryLimitsSnapshot };
+  }
+
+  /**
+   * Lấy hạn mức tuần của một danh mục từ bản chụp (Snapshot) của riêng tuần này.
+   * Trả về null nếu danh mục chưa có trong snapshot (để fallback về Category.weeklyLimit).
+   */
+  public getCategoryLimitSnapshot(categoryId: string): Money | null {
+    if (Object.prototype.hasOwnProperty.call(this._categoryLimitsSnapshot, categoryId)) {
+      return Money.fromAmount(this._categoryLimitsSnapshot[categoryId]);
+    }
+    return null;
+  }
+
+  public setCategoryLimitSnapshot(categoryId: string, limit: Money): void {
+    if (limit.isNegative()) {
+      throw new Error('Hạn mức tuần trong snapshot không được là số âm.');
+    }
+    this._categoryLimitsSnapshot[categoryId.trim()] = limit.amount;
+  }
+
+  public updateCategoryLimitsSnapshot(snapshot: Record<string, number>): void {
+    this._categoryLimitsSnapshot = {
+      ...this._categoryLimitsSnapshot,
+      ...WeeklyCycle.sanitizeSnapshot(snapshot),
+    };
+  }
+
   public get transactions(): ReadonlyArray<Transaction> {
     return [...this._transactions].sort(
       (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
@@ -94,9 +143,6 @@ export class WeeklyCycle {
     return this._totalSaving;
   }
 
-  /**
-   * Tổng quỹ tiền có thể chi tiêu trong tuần (Số dư đầu tuần + Chu cấp tuần + Thu nhập thêm - Tiết kiệm)
-   */
   public get spendableBudget(): Money {
     return this._openingBalance
       .add(this._weeklyAllowance)
@@ -104,9 +150,6 @@ export class WeeklyCycle {
       .subtract(this._totalSaving);
   }
 
-  /**
-   * Số dư còn lại thực tế trong tuần (spendableBudget - totalExpense)
-   */
   public get remainingBalance(): Money {
     return this.spendableBudget.subtract(this._totalExpense);
   }
@@ -130,43 +173,28 @@ export class WeeklyCycle {
     return !alreadyExists;
   }
 
-  /**
-   * Thêm giao dịch vào chu kỳ bằng cách kích hoạt đa hình applyToCycle
-   */
   public addTransaction(transaction: Transaction): void {
     transaction.applyToCycle(this);
   }
 
-  /**
-   * Double-dispatch handler cho ExpenseTransaction
-   */
   public registerExpense(transaction: ExpenseTransaction): void {
     if (!this.validateTransactionBeforeRegister(transaction)) return;
     this._transactions.push(transaction);
     this._totalExpense = this._totalExpense.add(transaction.amount);
   }
 
-  /**
-   * Double-dispatch handler cho IncomeTransaction
-   */
   public registerIncome(transaction: IncomeTransaction): void {
     if (!this.validateTransactionBeforeRegister(transaction)) return;
     this._transactions.push(transaction);
     this._totalIncome = this._totalIncome.add(transaction.amount);
   }
 
-  /**
-   * Double-dispatch handler cho SavingTransaction
-   */
   public registerSaving(transaction: SavingTransaction): void {
     if (!this.validateTransactionBeforeRegister(transaction)) return;
     this._transactions.push(transaction);
     this._totalSaving = this._totalSaving.add(transaction.amount);
   }
 
-  /**
-   * Xóa một giao dịch khỏi chu kỳ và tính toán lại tổng tiền
-   */
   public removeTransaction(transactionId: string): Transaction {
     this.assertOpen();
 
@@ -210,30 +238,12 @@ export class WeeklyCycle {
     this._openingBalance = newOpeningBalance;
   }
 
-  /**
-   * Tính hạn mức chi tiêu an toàn mỗi ngày cho những ngày còn lại trong tuần
-   */
-  public getDailySafeSpend(currentDate: Date = new Date()): Money {
-    const remaining = this.remainingBalance;
-    if (!remaining.isPositive()) {
-      return Money.zero();
-    }
-    const remainingDays = this._weekPeriod.getRemainingDaysFrom(currentDate);
-    return remaining.divide(remainingDays);
-  }
-
-  /**
-   * Tính tổng số tiền đã giao dịch theo một categoryId cụ thể
-   */
   public getTotalByCategory(categoryId: string): Money {
     return this._transactions
       .filter((tx) => tx.categoryId === categoryId)
       .reduce((sum, tx) => sum.add(tx.amount), Money.zero());
   }
 
-  /**
-   * Phần trăm ngân sách đã chi tiêu trong tuần (0 -> 100+)
-   */
   public getBudgetUsagePercentage(): number {
     const budget = this.spendableBudget;
     if (!budget.isPositive()) {
@@ -242,9 +252,6 @@ export class WeeklyCycle {
     return Math.round((this._totalExpense.amount / budget.amount) * 100);
   }
 
-  /**
-   * Đóng chu kỳ tuần và trả về số dư cuối tuần để kết chuyển sang tuần kế tiếp
-   */
   public closeCycle(): Money {
     this._isClosed = true;
     return this.remainingBalance;

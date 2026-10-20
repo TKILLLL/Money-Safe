@@ -39,6 +39,7 @@ export class LocalStorageTransactionRepository implements ITransactionRepository
       this.ssrMemoryStore = dtos;
       return;
     }
+    SeedData.markAsSeededPermanently();
     window.localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(dtos));
   }
 
@@ -71,6 +72,11 @@ export class LocalStorageTransactionRepository implements ITransactionRepository
     const dtos = this.readAllDTOs();
     const filtered = dtos.filter((item) => item.id !== id);
     this.writeAllDTOs(filtered);
+  }
+
+  public async clearAll(): Promise<void> {
+    SeedData.markAsSeededPermanently();
+    this.writeAllDTOs([]);
   }
 
   public async findById(id: string): Promise<Transaction | null> {

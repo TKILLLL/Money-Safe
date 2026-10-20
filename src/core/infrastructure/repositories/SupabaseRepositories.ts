@@ -52,6 +52,7 @@ interface WeeklyCycleRow {
   weekly_allowance_amount: number;
   currency: string;
   is_closed: boolean;
+  category_limits_snapshot?: Record<string, number> | null;
 }
 
 interface AuditLogRow {
@@ -82,6 +83,20 @@ class SupabaseRestClient {
       'Content-Type': 'application/json',
       ...extraHeaders,
     };
+  }
+
+  public async deleteAll(table: string): Promise<void> {
+    const response = await fetch(
+      `${this.baseUrl}/rest/v1/${table}?id=not.is.null`,
+      {
+        method: 'DELETE',
+        headers: this.getHeaders({ Prefer: 'return=minimal' }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Supabase DELETE ALL error on ${table}: ${response.statusText}`);
+    }
   }
 
   public async select<T>(table: string, queryString: string = ''): Promise<T[]> {
@@ -168,6 +183,18 @@ export class SupabaseCategoryRepository implements ICategoryRepository {
       currency: row.currency || 'VND',
       isArchived: Boolean(row.is_archived),
     });
+  }
+
+  public async saveAll(categories: Category[]): Promise<void> {
+    await this.localFallback.saveAll(categories);
+    try {
+      const rows = categories.map((cat) => this.toRow(cat));
+      if (rows.length > 0) {
+        await this.client.upsert('categories', rows);
+      }
+    } catch {
+      // Giữ ở LocalStorage nếu offline
+    }
   }
 
   public async save(category: Category): Promise<void> {
@@ -259,6 +286,15 @@ export class SupabaseTransactionRepository implements ITransactionRepository {
     });
   }
 
+  public async clearAll(): Promise<void> {
+    await this.localFallback.clearAll();
+    try {
+      await this.client.deleteAll('transactions');
+    } catch {
+      // Offline-first fallback
+    }
+  }
+
   public async save(transaction: Transaction): Promise<void> {
     await this.localFallback.save(transaction);
     try {
@@ -339,9 +375,9 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
     this.localFallback = localFallback;
   }
 
-  private toRow(cycle: WeeklyCycle): WeeklyCycleRow {
+  private toRow(cycle: WeeklyCycle, includeSnapshotColumn: boolean = true): WeeklyCycleRow {
     const dto = WeeklyCycleMapper.toPersistence(cycle);
-    return {
+    const baseRow: WeeklyCycleRow = {
       id: dto.id,
       week_key: dto.weekKey,
       start_date_iso: dto.startDateISO,
@@ -350,14 +386,33 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
       currency: dto.currency,
       is_closed: dto.isClosed,
     };
+
+    if (includeSnapshotColumn) {
+      baseRow.category_limits_snapshot = dto.categoryLimitsSnapshot ?? {};
+    }
+    return baseRow;
+  }
+
+  public async clearAll(): Promise<void> {
+    await this.localFallback.clearAll();
+    try {
+      await this.client.deleteAll('weekly_cycles');
+    } catch {
+      // Offline-first fallback
+    }
   }
 
   public async save(cycle: WeeklyCycle): Promise<void> {
     await this.localFallback.save(cycle);
     try {
-      await this.client.upsert('weekly_cycles', this.toRow(cycle));
+      await this.client.upsert('weekly_cycles', this.toRow(cycle, true));
     } catch {
-      // Offline-first fallback
+      try {
+        // Fallback nếu bảng weekly_cycles trên Supabase chưa thêm cột category_limits_snapshot
+        await this.client.upsert('weekly_cycles', this.toRow(cycle, false));
+      } catch {
+        // Giữ dữ liệu ở LocalStorage khi offline
+      }
     }
   }
 
@@ -366,6 +421,8 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
   }
 
   public async findByWeekPeriod(period: WeekPeriod): Promise<WeeklyCycle | null> {
+    const localCycle = await this.localFallback.findByWeekPeriod(period);
+
     try {
       const weekKey = encodeURIComponent(period.weekKey);
       const rows = await this.client.select<WeeklyCycleRow>(
@@ -376,7 +433,15 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
       if (rows.length > 0) {
         const row = rows[0];
         const weekTransactions = await this.transactionRepo.findByWeekPeriod(period);
-        return WeeklyCycleMapper.toDomain({
+        const remoteSnapshot =
+          row.category_limits_snapshot &&
+          Object.keys(row.category_limits_snapshot).length > 0
+            ? row.category_limits_snapshot
+            : localCycle
+              ? { ...localCycle.categoryLimitsSnapshot }
+              : {};
+
+        const hydrated = WeeklyCycleMapper.toDomain({
           id: row.id,
           weekKey: row.week_key,
           startDateISO: row.start_date_iso,
@@ -387,15 +452,24 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
           transactions: weekTransactions.map((tx) =>
             TransactionMapper.toPersistence(tx)
           ),
+          categoryLimitsSnapshot: remoteSnapshot,
         });
+
+        await this.localFallback.save(hydrated);
+        return hydrated;
       }
     } catch {
       // Offline-first fallback
     }
-    return this.localFallback.findByWeekPeriod(period);
+    return localCycle;
   }
 
   public async findAllCycles(): Promise<WeeklyCycle[]> {
+    const localCycles = await this.localFallback.findAllCycles();
+    const localSnapshotMap = new Map<string, Record<string, number>>(
+      localCycles.map((c) => [c.weekPeriod.weekKey, { ...c.categoryLimitsSnapshot }])
+    );
+
     try {
       const rows = await this.client.select<WeeklyCycleRow>(
         'weekly_cycles',
@@ -412,13 +486,18 @@ export class SupabaseWeeklyCycleRepository implements IWeeklyCycleRepository {
             currency: row.currency || 'VND',
             isClosed: Boolean(row.is_closed),
             transactions: [],
+            categoryLimitsSnapshot:
+              row.category_limits_snapshot &&
+              Object.keys(row.category_limits_snapshot).length > 0
+                ? row.category_limits_snapshot
+                : (localSnapshotMap.get(row.week_key) ?? {}),
           })
         );
       }
     } catch {
       // Offline-first fallback
     }
-    return this.localFallback.findAllCycles();
+    return localCycles;
   }
 }
 
@@ -435,6 +514,15 @@ export class SupabaseAuditLogRepository implements IAuditLogRepository {
   ) {
     this.client = new SupabaseRestClient(config);
     this.localFallback = localFallback;
+  }
+
+  public async clearAll(): Promise<void> {
+    await this.localFallback.clearAll();
+    try {
+      await this.client.deleteAll('audit_logs');
+    } catch {
+      // Offline-first fallback
+    }
   }
 
   public async log(entry: AuditLog): Promise<void> {

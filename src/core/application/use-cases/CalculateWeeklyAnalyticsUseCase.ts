@@ -1,5 +1,7 @@
+// src/core/application/use-cases/CalculateWeeklyAnalyticsUseCase.ts
 import type { Category, CategoryType } from '../../domain/entities/Category';
 import type { Transaction } from '../../domain/entities/Transaction';
+import type { WeeklyCycle } from '../../domain/entities/WeeklyCycle';
 import type { ICategoryRepository } from '../../domain/repositories/ICategoryRepository';
 import type { ITransactionRepository } from '../../domain/repositories/ITransactionRepository';
 import type { IWeeklyCycleRepository } from '../../domain/repositories/IWeeklyCycleRepository';
@@ -7,20 +9,7 @@ import { Money } from '../../domain/value-objects/Money';
 import { WeekPeriod } from '../../domain/value-objects/WeekPeriod';
 
 /**
- * 1. DTO cho Widget "Được tiêu hôm nay" (DailySafeToSpendAllowance)
- */
-export interface DailySafeToSpendMetrics {
-  remainingDays: number;           // 1 -> 7 ngày
-  todaySpent: Money;               // Tổng tiền chi tiêu trong ngày hôm nay
-  startOfDayRemaining: Money;      // RemainingWeeklyBalance + TodaySpent
-  dailyAllowance: Money;           // Math.max(0, Math.floor(StartOfDayRemaining / RemainingDays))
-  todayRemaining: Money;           // DailyAllowance - TodaySpent
-  todayUsagePercentage: number;    // 0 -> 100%
-  isOverspentToday: boolean;       // TodayRemaining < 0
-}
-
-/**
- * 2. DTO cho Tóm tắt Tuần (Weekly Summary)
+ * 1. DTO cho Tóm tắt Tuần (Weekly Summary)
  */
 export interface WeeklySummaryMetrics {
   openingBalance: Money;           // Số dư đầu tuần
@@ -35,7 +24,7 @@ export interface WeeklySummaryMetrics {
 }
 
 /**
- * 3. DTO cho Biểu đồ Tròn (Donut Chart)
+ * 2. DTO cho Biểu đồ Tròn (Donut Chart)
  */
 export interface CategoryBreakdownItem {
   categoryId: string;
@@ -49,7 +38,7 @@ export interface CategoryBreakdownItem {
 }
 
 /**
- * 4. DTO cho Biểu đồ Cột (Bar Chart: Thứ 2 -> Chủ Nhật)
+ * 3. DTO cho Biểu đồ Cột (Bar Chart: Thứ 2 -> Chủ Nhật)
  */
 export interface DailySpendingBarItem {
   date: Date;
@@ -64,7 +53,7 @@ export interface DailySpendingBarItem {
 }
 
 /**
- * 5. DTO cho Tình trạng Ngân sách từng danh mục (Category Budget Status)
+ * 4. DTO cho Tình trạng Ngân sách từng danh mục (Category Budget Status)
  */
 export type BudgetHealthStatus = 'SAFE' | 'WARNING' | 'OVER_LIMIT';
 
@@ -83,14 +72,28 @@ export interface CategoryBudgetStatusItem {
 }
 
 /**
+ * 5. DTO cho Bảng Thông báo & Thống kê Đầu tuần (Previous Week Recap)
+ */
+export interface PreviousWeekRecapMetrics {
+  weekPeriod: WeekPeriod;
+  weekLabel: string;               // VD: "12/10 - 18/10/2026"
+  savedAmount: Money;              // Tổng số tiền đã Tiết kiệm được trong tuần trước
+  remainingWeeklyBalance: Money;   // Tổng ngân sách tuần trước - Tổng đã chi tiêu tuần trước
+  totalWeeklyAvailable: Money;     // Tổng ngân sách tuần trước
+  totalWeeklyExpense: Money;       // Tổng đã chi tiêu trong tuần trước
+  transactionCount: number;        // Số lượng giao dịch phát sinh tuần trước
+  hasActivity: boolean;            // Tuần trước có phát sinh dữ liệu hay không
+}
+
+/**
  * Kết quả tổng hợp trả về cho Presentation Layer
  */
 export interface WeeklyAnalyticsOutput {
   weekPeriod: WeekPeriod;
   weekLabel: string;
   isClosed: boolean;
-  dailySafeToSpend: DailySafeToSpendMetrics;
   weeklySummary: WeeklySummaryMetrics;
+  previousWeekRecap: PreviousWeekRecapMetrics;
   donutChartData: CategoryBreakdownItem[];
   barChartData: DailySpendingBarItem[];
   categoryBudgets: CategoryBudgetStatusItem[];
@@ -108,14 +111,22 @@ export class CalculateWeeklyAnalyticsUseCase {
 
   public async execute(referenceDate: Date = new Date()): Promise<WeeklyAnalyticsOutput> {
     const weekPeriod = WeekPeriod.fromDate(referenceDate);
+    const previousPeriod = weekPeriod.getPreviousWeek();
 
-    const [cycle, transactionsInRepo, categories] = await Promise.all([
+    const [
+      cycle,
+      transactionsInRepo,
+      categories,
+      previousCycle,
+      previousTransactionsInRepo,
+    ] = await Promise.all([
       this.weeklyCycleRepository.findByWeekPeriod(weekPeriod),
       this.transactionRepository.findByWeekPeriod(weekPeriod),
       this.categoryRepository.findAll(true),
+      this.weeklyCycleRepository.findByWeekPeriod(previousPeriod),
+      this.transactionRepository.findByWeekPeriod(previousPeriod),
     ]);
 
-    // Ưu tiên danh sách giao dịch từ repository hoặc từ cycle
     const transactions: ReadonlyArray<Transaction> =
       transactionsInRepo.length > 0
         ? [...transactionsInRepo].sort(
@@ -129,7 +140,7 @@ export class CalculateWeeklyAnalyticsUseCase {
     const weeklyAllowance = cycle ? cycle.weeklyAllowance : Money.zero();
     const isClosed = cycle ? cycle.isClosed : false;
 
-    // 1. Tính tổng Thu / Chi / Tiết kiệm trong tuần
+    // 1. Tính tổng Thu / Chi / Tiết kiệm trong tuần đang xét
     let totalExpenseOnly = Money.zero();
     let totalSavingAllocated = Money.zero();
     let totalOtherIncome = Money.zero();
@@ -145,15 +156,11 @@ export class CalculateWeeklyAnalyticsUseCase {
       }
     }
 
-    // Công thức 1: TotalWeeklyAvailable = OpeningBalance + WeeklyAllowance + TotalOtherIncome
     const totalWeeklyAvailable = openingBalance
       .add(weeklyAllowance)
       .add(totalOtherIncome);
 
-    // Tổng chi trong tuần (bao gồm cả khoản đưa vào Tiết kiệm tính là chi phân bổ)
     const totalWeeklyExpense = totalExpenseOnly.add(totalSavingAllocated);
-
-    // Công thức 2: RemainingWeeklyBalance = TotalWeeklyAvailable - TotalWeeklyExpense
     const remainingWeeklyBalance = totalWeeklyAvailable.subtract(totalWeeklyExpense);
 
     const weeklyUsagePercentage =
@@ -178,12 +185,12 @@ export class CalculateWeeklyAnalyticsUseCase {
       weeklyUsagePercentage,
     };
 
-    // 2. Công thức 3: Tính Widget "Được tiêu hôm nay" (DailySafeToSpendAllowance)
-    const dailySafeToSpend = this.computeDailySafeToSpend(
-      weekPeriod,
-      referenceDate,
-      remainingWeeklyBalance,
-      transactions
+    // 2. Tính toán Bảng Tổng kết Tuần trước (Previous Week Recap)
+    const previousWeekRecap = this.computePreviousWeekRecap(
+      previousPeriod,
+      previousCycle,
+      previousTransactionsInRepo,
+      categories
     );
 
     // 3. Dữ liệu Biểu đồ Tròn (Donut Chart)
@@ -192,15 +199,19 @@ export class CalculateWeeklyAnalyticsUseCase {
     // 4. Dữ liệu Biểu đồ Cột (Bar Chart: T2 -> CN)
     const barChartData = this.computeBarChartData(weekPeriod, referenceDate, transactions);
 
-    // 5. Tình trạng Ngân sách từng danh mục (Category Budget Status)
-    const categoryBudgets = this.computeCategoryBudgets(transactions, categories);
+    // 5. Tình trạng Ngân sách từng danh mục (Đọc từ categoryLimitsSnapshot của chính WeeklyCycle đó)
+    const categoryBudgets = this.computeCategoryBudgets(
+      transactions,
+      categories,
+      cycle
+    );
 
     return {
       weekPeriod,
       weekLabel: weekPeriod.formatLabel(),
       isClosed,
-      dailySafeToSpend,
       weeklySummary,
+      previousWeekRecap,
       donutChartData,
       barChartData,
       categoryBudgets,
@@ -209,67 +220,77 @@ export class CalculateWeeklyAnalyticsUseCase {
   }
 
   /**
-   * Cài đặt chính xác công thức "Được tiêu hôm nay" (DailySafeToSpendAllowance)
+   * Tính toán dữ liệu Tổng kết Tuần liền trước (Monday Weekly Recap)
    */
-  private computeDailySafeToSpend(
-    weekPeriod: WeekPeriod,
-    referenceDate: Date,
-    remainingWeeklyBalance: Money,
-    transactions: ReadonlyArray<Transaction>
-  ): DailySafeToSpendMetrics {
-    // RemainingDays: từ 1 đến 7 ngày
-    const remainingDays = weekPeriod.getRemainingDaysFrom(referenceDate);
+  private computePreviousWeekRecap(
+    previousPeriod: WeekPeriod,
+    previousCycle: WeeklyCycle | null,
+    previousTransactionsInRepo: ReadonlyArray<Transaction>,
+    categories: ReadonlyArray<Category>
+  ): PreviousWeekRecapMetrics {
+    const prevTransactions: ReadonlyArray<Transaction> =
+      previousTransactionsInRepo.length > 0
+        ? previousTransactionsInRepo
+        : previousCycle
+          ? previousCycle.transactions
+          : [];
 
-    // TodaySpent: Tổng tiền chi tiêu trong ngày đang xét
-    let todaySpentAmount = 0;
-    for (const tx of transactions) {
-      if (
-        (tx.getType() === 'EXPENSE' || tx.getType() === 'SAVING') &&
-        this.isSameCalendarDay(tx.timestamp, referenceDate)
-      ) {
-        todaySpentAmount += tx.amount.amount;
+    const savingCategoryIds = new Set<string>(
+      categories
+        .filter(
+          (c) =>
+            c.type === 'SAVING' ||
+            c.id === 'cat_saving' ||
+            c.name.toLowerCase().includes('tiết kiệm')
+        )
+        .map((c) => c.id)
+    );
+
+    const prevOpening = previousCycle ? previousCycle.openingBalance : Money.zero();
+    const prevAllowance = previousCycle ? previousCycle.weeklyAllowance : Money.zero();
+
+    let prevExpenseOnly = Money.zero();
+    let prevSaving = Money.zero();
+    let prevOtherIncome = Money.zero();
+
+    for (const tx of prevTransactions) {
+      const txType = tx.getType();
+      const isSavingTx =
+        txType === 'SAVING' || savingCategoryIds.has(tx.categoryId);
+
+      if (isSavingTx) {
+        prevSaving = prevSaving.add(tx.amount);
+      } else if (txType === 'EXPENSE') {
+        prevExpenseOnly = prevExpenseOnly.add(tx.amount);
+      } else if (txType === 'INCOME') {
+        prevOtherIncome = prevOtherIncome.add(tx.amount);
       }
     }
 
-    const todaySpent = Money.fromAmount(todaySpentAmount);
+    const totalWeeklyAvailable = prevOpening
+      .add(prevAllowance)
+      .add(prevOtherIncome);
 
-    // StartOfDayRemaining = RemainingWeeklyBalance + TodaySpent
-    const startOfDayRemainingAmount = remainingWeeklyBalance.amount + todaySpent.amount;
-    const startOfDayRemaining = Money.fromAmount(startOfDayRemainingAmount);
+    const totalWeeklyExpense = prevExpenseOnly.add(prevSaving);
+    const remainingWeeklyBalance = totalWeeklyAvailable.subtract(totalWeeklyExpense);
 
-    // DailyAllowance = Math.max(0, Math.floor(StartOfDayRemaining / RemainingDays))
-    const dailyAllowanceAmount = Math.max(
-      0,
-      Math.floor(startOfDayRemainingAmount / remainingDays)
-    );
-    const dailyAllowance = Money.fromAmount(dailyAllowanceAmount);
-
-    // TodayRemaining = DailyAllowance - TodaySpent
-    const todayRemainingAmount = dailyAllowanceAmount - todaySpent.amount;
-    const todayRemaining = Money.fromAmount(todayRemainingAmount);
-
-    // TodayUsagePercentage = DailyAllowance > 0 ? Math.min(100, Math.round((TodaySpent / DailyAllowance) * 100)) : (TodaySpent > 0 ? 100 : 0)
-    const todayUsagePercentage =
-      dailyAllowanceAmount > 0
-        ? Math.min(100, Math.round((todaySpent.amount / dailyAllowanceAmount) * 100))
-        : todaySpent.amount > 0
-          ? 100
-          : 0;
+    const hasActivity =
+      prevTransactions.length > 0 ||
+      totalWeeklyAvailable.isPositive() ||
+      totalWeeklyExpense.isPositive();
 
     return {
-      remainingDays,
-      todaySpent,
-      startOfDayRemaining,
-      dailyAllowance,
-      todayRemaining,
-      todayUsagePercentage,
-      isOverspentToday: todayRemainingAmount < 0,
+      weekPeriod: previousPeriod,
+      weekLabel: previousPeriod.formatLabel(),
+      savedAmount: prevSaving,
+      remainingWeeklyBalance,
+      totalWeeklyAvailable,
+      totalWeeklyExpense,
+      transactionCount: prevTransactions.length,
+      hasActivity,
     };
   }
 
-  /**
-   * Tính tỷ trọng % và tổng tiền theo từng danh mục cho Biểu đồ Tròn (Donut Chart)
-   */
   private computeDonutChartData(
     transactions: ReadonlyArray<Transaction>,
     categories: ReadonlyArray<Category>
@@ -318,9 +339,6 @@ export class CalculateWeeklyAnalyticsUseCase {
     return items.sort((a, b) => b.amount.amount - a.amount.amount);
   }
 
-  /**
-   * Tính tổng chi tiêu của từng ngày từ Thứ 2 đến Chủ Nhật cho Biểu đồ Cột (Bar Chart)
-   */
   private computeBarChartData(
     weekPeriod: WeekPeriod,
     referenceDate: Date,
@@ -377,12 +395,10 @@ export class CalculateWeeklyAnalyticsUseCase {
     return bars;
   }
 
-  /**
-   * Tính tình trạng Ngân sách từng danh mục (weeklyLimit, spent, remaining, usagePercentage)
-   */
   private computeCategoryBudgets(
     transactions: ReadonlyArray<Transaction>,
-    categories: ReadonlyArray<Category>
+    categories: ReadonlyArray<Category>,
+    cycle: WeeklyCycle | null
   ): CategoryBudgetStatusItem[] {
     const spentByCategory = new Map<string, number>();
 
@@ -397,7 +413,10 @@ export class CalculateWeeklyAnalyticsUseCase {
 
     const statusList: CategoryBudgetStatusItem[] = activeCategories.map((cat) => {
       const spentAmount = spentByCategory.get(cat.id) ?? 0;
-      const limitAmount = cat.weeklyLimit.amount;
+
+      const effectiveLimitMoney =
+        cycle?.getCategoryLimitSnapshot(cat.id) ?? cat.weeklyLimit;
+      const limitAmount = effectiveLimitMoney.amount;
       const hasLimit = limitAmount > 0;
 
       const remainingAmount = hasLimit ? limitAmount - spentAmount : 0;
@@ -422,7 +441,7 @@ export class CalculateWeeklyAnalyticsUseCase {
         icon: cat.icon,
         color: cat.color,
         type: cat.type,
-        weeklyLimit: cat.weeklyLimit,
+        weeklyLimit: effectiveLimitMoney,
         spent: Money.fromAmount(spentAmount),
         remaining: Money.fromAmount(remainingAmount),
         usagePercentage,
@@ -431,7 +450,6 @@ export class CalculateWeeklyAnalyticsUseCase {
       };
     });
 
-    // Sắp xếp ưu tiên các danh mục có tỷ lệ sử dụng ngân sách cao nhất lên đầu
     return statusList.sort((a, b) => {
       if (a.hasLimit !== b.hasLimit) {
         return a.hasLimit ? -1 : 1;

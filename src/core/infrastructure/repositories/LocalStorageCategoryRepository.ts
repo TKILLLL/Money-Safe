@@ -43,6 +43,7 @@ export class LocalStorageCategoryRepository implements ICategoryRepository {
       this.ssrMemoryStore = dtos;
       return;
     }
+    SeedData.markAsSeededPermanently();
     window.localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(dtos));
   }
 
@@ -57,6 +58,14 @@ export class LocalStorageCategoryRepository implements ICategoryRepository {
       dtos.push(dto);
     }
 
+    this.writeAllDTOs(dtos);
+  }
+
+  /**
+   * Ghi đè đồng loạt danh sách danh mục (giữ nguyên 100% thứ tự hiển thị)
+   */
+  public async saveAll(categories: Category[]): Promise<void> {
+    const dtos = categories.map((cat) => CategoryMapper.toPersistence(cat));
     this.writeAllDTOs(dtos);
   }
 
