@@ -104,6 +104,7 @@ export const CalendarLogScreen: React.FC = () => {
   const [viewMode, setViewMode] = useState<CalendarViewMode>('WEEK');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [focusedDateKey, setFocusedDateKey] = useState<string | null>(null);
+  const [todayKey, setTodayKey] = useState<string>('');
 
   // 2. Dữ liệu giao dịch cả tháng (phục vụ khi bật chế độ Lịch Tháng)
   const [monthTransactions, setMonthTransactions] = useState<Transaction[]>([]);
@@ -111,6 +112,11 @@ export const CalendarLogScreen: React.FC = () => {
   // 3. Trạng thái Modal Chỉnh sửa Giao dịch & Modal Audit Log
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState<boolean>(false);
+
+  // Đồng bộ ngày hôm nay trên Client trong useEffect (Tránh gọi new Date() lúc Prerender)
+  useEffect(() => {
+    setTodayKey(toDateKey(new Date()));
+  }, []);
 
   // Map tra cứu nhanh Category theo ID (bao gồm cả danh mục đã archive để không lỗi lịch sử)
   const categoryMap = useMemo(() => {
@@ -167,7 +173,6 @@ export const CalendarLogScreen: React.FC = () => {
 
   // Xây dựng danh sách các ô lịch (7 ô cho Lịch Tuần, 35-42 ô cho Lịch Tháng)
   const calendarCells = useMemo<CalendarCellData[]>(() => {
-    const todayKey = toDateKey(new Date());
     const selectedKey = toDateKey(selectedDate);
 
     if (viewMode === 'WEEK') {
@@ -193,7 +198,7 @@ export const CalendarLogScreen: React.FC = () => {
           dayNumber: d.getDate(),
           isCurrentMonth: true,
           isSelectedWeek: true,
-          isToday: key === todayKey,
+          isToday: todayKey !== '' && key === todayKey,
           isSelectedDate: key === selectedKey,
           spentAmount: totals.spent,
           incomeAmount: totals.income,
@@ -248,7 +253,7 @@ export const CalendarLogScreen: React.FC = () => {
         dayNumber: d.getDate(),
         isCurrentMonth: d.getMonth() === month,
         isSelectedWeek: selectedWeek.contains(d),
-        isToday: key === todayKey,
+        isToday: todayKey !== '' && key === todayKey,
         isSelectedDate: key === selectedKey,
         spentAmount: totals.spent,
         incomeAmount: totals.income,
@@ -256,7 +261,7 @@ export const CalendarLogScreen: React.FC = () => {
     }
 
     return cells;
-  }, [viewMode, selectedWeek, selectedDate, dailyTotalsMap]);
+  }, [viewMode, selectedWeek, selectedDate, dailyTotalsMap, todayKey]);
 
   // Lọc và phân nhóm giao dịch theo từng ngày (Timeline List)
   const timelineGroups = useMemo<DayTransactionGroup[]>(() => {

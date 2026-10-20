@@ -1,50 +1,105 @@
 /* src/app/globals.css */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
-  :root {
-    --bg-primary: #F4F7FE;
-    --surface-card: #FFFFFF;
-    --accent-primary: #8B5CF6;
-    --accent-secondary: #A855F7;
-    --semantic-safe: #10B981;
-    --semantic-warning: #F97316;
-    --semantic-danger: #EF4444;
-  }
+@theme {
+  /* Nền chính & Thẻ nội dung Soft UI */
+  --color-background: #F4F7FE;
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #F8FAFC;
+  --color-surface-subtle: #EEF2FF;
 
-  html {
-    -webkit-tap-highlight-color: transparent;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    scroll-behavior: smooth;
-  }
+  /* Màu nhấn chủ đạo: Tím Lavender / Violet */
+  --color-primary-50: #F5F3FF;
+  --color-primary-100: #EDE9FE;
+  --color-primary-200: #DDD6FE;
+  --color-primary: #8B5CF6;
+  --color-primary-accent: #A855F7;
+  --color-primary-600: #7C3AED;
+  --color-primary-700: #6D28D9;
 
-  body {
-    background-color: var(--bg-primary);
-    color: #1E293B;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", Segoe UI, Roboto, sans-serif;
-    min-height: 100dvh;
-    overflow-x: hidden;
-  }
+  /* Màu ngữ nghĩa (Semantic Colors) */
+  --color-semantic-safe-light: #D1FAE5;
+  --color-semantic-safe: #10B981;
+  --color-semantic-safe-dark: #047857;
+
+  --color-semantic-warning-light: #FFEDD5;
+  --color-semantic-warning: #F97316;
+  --color-semantic-warning-dark: #C2410C;
+
+  --color-semantic-danger-light: #FEE2E2;
+  --color-semantic-danger: #EF4444;
+  --color-semantic-danger-dark: #B91C1C;
+
+  /* Hệ màu chữ độ tương phản cao chuẩn Apple */
+  --color-ink-primary: #1E293B;
+  --color-ink-secondary: #64748B;
+  --color-ink-muted: #94A3B8;
+
+  /* Đổ bóng mịn lan tỏa đặc trưng của Soft UI */
+  --shadow-soft: 0 8px 30px rgba(15, 23, 42, 0.05);
+  --shadow-soft-md: 0 14px 40px rgba(15, 23, 42, 0.08);
+  --shadow-soft-primary: 0 8px 24px -4px rgba(139, 92, 246, 0.4);
+  --shadow-inner-soft: inset 0 2px 4px 0 rgba(15, 23, 42, 0.04);
+
+  /* Chuyển động mượt chuẩn Apple Spring */
+  --ease-apple-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@layer utilities {
-  /* Hỗ trợ Safe Area cho PWA trên iPhone */
-  .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom, 1rem);
-  }
-  .pt-safe {
-    padding-top: env(safe-area-inset-top, 0px);
-  }
+/* Reset triệt để giao diện mặc định của trình duyệt cho Button & Input */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
-  /* Ẩn thanh cuộn nhưng vẫn cho phép vuốt mượt trên iOS/macOS */
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: #F4F7FE;
+  color: #1E293B;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", Segoe UI, Roboto, sans-serif;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  color: inherit;
+  margin: 0;
+  background-color: transparent;
+  border: 0;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Hỗ trợ Safe Area cho PWA trên iPhone */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0.75rem);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Ẩn thanh cuộn nhưng vẫn cho phép vuốt mượt */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

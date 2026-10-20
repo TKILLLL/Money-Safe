@@ -33,13 +33,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="vi">
-      <head>
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="UniSpend" />
-      </head>
-      <body className="antialiased selection:bg-primary/20 selection:text-primary">
+    <html lang="vi" suppressHydrationWarning>
+      <body
+        suppressHydrationWarning
+        className="antialiased selection:bg-primary/20 selection:text-primary"
+      >
         <ExpenseTrackerProvider>{children}</ExpenseTrackerProvider>
       </body>
     </html>
