@@ -14,22 +14,18 @@ import { useExpenseTracker } from '@/components/providers/ExpenseTrackerProvider
 import { CategoryManagerModal } from '@/components/screens/CategoryManagerModal';
 import { CategoryIcon } from '@/components/ui/CategoryIcon';
 import { PillButton } from '@/components/ui/PillButton';
+import { SmartAmountChips } from '@/components/ui/SmartAmountChips';
 import { SoftCard } from '@/components/ui/SoftCard';
 import { cn } from '@/lib/utils';
 
 type EntryTabMode = 'EXPENSE_MODE' | 'INCOME_MODE';
 
-const QUICK_AMOUNT_CHIPS: readonly number[] = [15_000, 30_000, 35_000, 50_000, 100_000];
-
-/**
- * Định dạng ngày chuẩn DD/MM/YYYY (Th X)
- */
 function formatVietnameseEntryDate(date: Date): string {
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const year = date.getFullYear();
 
-  const dayOfWeek = date.getDay(); // 0: CN, 1: Th 2 ... 6: Th 7
+  const dayOfWeek = date.getDay();
   const weekdayLabel = dayOfWeek === 0 ? 'CN' : `Th ${dayOfWeek + 1}`;
 
   return `${day}/${month}/${year} (${weekdayLabel})`;
@@ -44,22 +40,22 @@ export const QuickEntryScreen: React.FC = () => {
     saveCategory,
   } = useExpenseTracker();
 
-  // 1. Header Segmented Control state ('EXPENSE_MODE' = Tiền chi, 'INCOME_MODE' = Tiền thu)
   const [entryMode, setEntryMode] = useState<EntryTabMode>('EXPENSE_MODE');
 
-  // 2. Form Nhập liệu state
+  // Form Nhập liệu state
   const [note, setNote] = useState<string>('');
   const [amountDigits, setAmountDigits] = useState<string>('');
+  const [isAmountChipDismissed, setIsAmountChipDismissed] =
+    useState<boolean>(false);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
 
-  // 3. UI & Modal state
+  // UI & Modal state
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [seededDefaultIncome, setSeededDefaultIncome] = useState<boolean>(false);
 
-  // Tự động khởi tạo 3 danh mục Tiền thu mẫu cho sinh viên nếu chuyển sang tab "Tiền thu" lần đầu
   useEffect(() => {
     if (entryMode !== 'INCOME_MODE' || seededDefaultIncome) return;
 
@@ -95,7 +91,6 @@ export const QuickEntryScreen: React.FC = () => {
     }
   }, [entryMode, categories, saveCategory, seededDefaultIncome]);
 
-  // Lọc danh mục theo tab "Tiền chi" (gồm EXPENSE & SAVING) hoặc "Tiền thu" (INCOME)
   const displayedCategories = useMemo(() => {
     if (entryMode === 'INCOME_MODE') {
       return categories.filter((c) => c.type === 'INCOME');
@@ -103,7 +98,6 @@ export const QuickEntryScreen: React.FC = () => {
     return categories.filter((c) => c.type === 'EXPENSE' || c.type === 'SAVING');
   }, [categories, entryMode]);
 
-  // Tự động chọn danh mục đầu tiên khi chuyển tab hoặc khi danh sách thay đổi
   useEffect(() => {
     if (displayedCategories.length === 0) {
       setSelectedCategoryId('');
@@ -117,14 +111,12 @@ export const QuickEntryScreen: React.FC = () => {
     }
   }, [displayedCategories, selectedCategoryId]);
 
-  // Tự động ẩn thông báo thành công sau 2.8 giây
   useEffect(() => {
     if (!toastMessage) return;
     const timer = setTimeout(() => setToastMessage(null), 2800);
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
-  // Điều hướng lùi / tiến 1 ngày
   const handleStepDay = (offsetDays: number) => {
     const nextDate = new Date(
       selectedDate.getFullYear(),
@@ -138,13 +130,21 @@ export const QuickEntryScreen: React.FC = () => {
     setSelectedDate(nextDate);
   };
 
-  // Xử lý gõ số tiền & tự động format dấu phẩy hàng nghìn
+  // Khi người dùng gõ hoặc xóa phím số -> bật lại thanh gợi ý tức thì
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setLocalError(null);
+    setIsAmountChipDismissed(false);
     const digitsOnly = e.target.value.replace(/\D/g, '');
     if (digitsOnly.length <= 10) {
       setAmountDigits(digitsOnly.replace(/^0+/, ''));
     }
+  };
+
+  // Khi người dùng bấm chọn 1 chip gợi ý -> điền số tiền và tự động ẩn thanh gợi ý
+  const handleSelectSmartAmount = (selectedValue: number) => {
+    setLocalError(null);
+    setAmountDigits(String(selectedValue));
+    setIsAmountChipDismissed(true);
   };
 
   const numericAmount = amountDigits ? parseInt(amountDigits, 10) : 0;
@@ -153,7 +153,6 @@ export const QuickEntryScreen: React.FC = () => {
       ? numericAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
       : '';
 
-  // Xử lý lưu giao dịch khi bấm Primary CTA Button
   const handleSubmitTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError(null);
@@ -193,6 +192,7 @@ export const QuickEntryScreen: React.FC = () => {
       });
 
       setAmountDigits('');
+      setIsAmountChipDismissed(false);
       setNote('');
 
       setToastMessage(
@@ -254,7 +254,6 @@ export const QuickEntryScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* Thông báo Toast khi lưu giao dịch thành công */}
       {toastMessage && (
         <div className="flex items-center gap-2 rounded-2xl bg-semantic-safe-light/90 px-4 py-3 text-xs sm:text-sm font-bold text-semantic-safe-dark border border-semantic-safe/25 shadow-soft animate-in fade-in slide-in-from-top-2 duration-200">
           <CheckCircle2 className="h-4 w-4 shrink-0 text-semantic-safe" />
@@ -262,17 +261,16 @@ export const QuickEntryScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Thông báo lỗi nhập liệu (nếu có) */}
       {localError && (
         <div className="rounded-2xl bg-semantic-danger-light px-4 py-2.5 text-xs font-semibold text-semantic-danger-dark border border-semantic-danger/20">
           {localError}
         </div>
       )}
 
-      {/* 2. FORM NHẬP LIỆU NHANH (Ngày -> Ghi chú -> Số tiền) */}
+      {/* 2. FORM NHẬP LIỆU NHANH */}
       <form onSubmit={(e) => void handleSubmitTransaction(e)} className="space-y-4">
         <SoftCard padding="none" radius="2xl" className="divide-y divide-slate-100 overflow-hidden">
-          {/* Hàng 1: NGÀY (DD/MM/YYYY (Th X) kèm 2 nút < >) */}
+          {/* Hàng 1: NGÀY */}
           <div className="flex items-center justify-between px-4 sm:px-5 py-3.5">
             <span className="text-xs sm:text-sm font-bold text-ink-secondary w-24 shrink-0">
               Ngày
@@ -305,7 +303,7 @@ export const QuickEntryScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Hàng 2: GHI CHÚ (Placeholder "Chưa nhập vào") */}
+          {/* Hàng 2: GHI CHÚ */}
           <div className="flex items-center justify-between px-4 sm:px-5 py-3.5">
             <label
               htmlFor="tx-note-input"
@@ -324,8 +322,8 @@ export const QuickEntryScreen: React.FC = () => {
             />
           </div>
 
-          {/* Hàng 3: TIỀN CHI / TIỀN THU */}
-          <div className="px-4 sm:px-5 py-4 space-y-3">
+          {/* Hàng 3: TIỀN CHI / TIỀN THU + SMART AMOUNT CHIPS KIỂU MB BANK */}
+          <div className="px-4 sm:px-5 py-4 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <label
                 htmlFor="tx-amount-input"
@@ -355,28 +353,13 @@ export const QuickEntryScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Gợi ý mệnh giá nhanh cho sinh viên */}
-            <div className="flex items-center justify-end gap-1.5 flex-wrap pt-0.5">
-              {QUICK_AMOUNT_CHIPS.map((chipValue) => (
-                <button
-                  key={chipValue}
-                  type="button"
-                  onClick={() => setAmountDigits(String(chipValue))}
-                  className="rounded-full bg-slate-100/90 hover:bg-primary-50 hover:text-primary px-2.5 py-1 text-[11px] font-semibold tabular-nums text-ink-secondary transition-colors active:scale-95"
-                >
-                  {chipValue.toLocaleString('en-US')}đ
-                </button>
-              ))}
-              {numericAmount > 0 && numericAmount < 10_000 && (
-                <button
-                  type="button"
-                  onClick={() => setAmountDigits(`${amountDigits}000`)}
-                  className="rounded-full bg-primary-50 px-2.5 py-1 text-[11px] font-bold text-primary transition-colors active:scale-95"
-                >
-                  +000
-                </button>
-              )}
-            </div>
+            {/* Thanh Gợi ý mệnh giá thông minh kiểu MB Bank */}
+            <SmartAmountChips
+              rawAmount={numericAmount}
+              isDismissed={isAmountChipDismissed}
+              onSelectAmount={handleSelectSmartAmount}
+              className="justify-end"
+            />
           </div>
         </SoftCard>
 
@@ -439,7 +422,6 @@ export const QuickEntryScreen: React.FC = () => {
               );
             })}
 
-            {/* Ô cuối cùng trong lưới luôn là nút "Chỉnh sửa >" */}
             <button
               type="button"
               onClick={() => setIsCategoryModalOpen(true)}
@@ -461,7 +443,7 @@ export const QuickEntryScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* 4. PRIMARY CTA BUTTON: "Nhập khoản chi" / "Nhập khoản thu" */}
+        {/* 4. PRIMARY CTA BUTTON */}
         <div className="pt-2">
           <PillButton
             type="submit"
@@ -477,7 +459,6 @@ export const QuickEntryScreen: React.FC = () => {
         </div>
       </form>
 
-      {/* Modal Chỉnh sửa / Thêm / Ẩn Danh mục */}
       <CategoryManagerModal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
